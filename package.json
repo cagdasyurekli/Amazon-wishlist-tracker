@@ -11,9 +11,9 @@
     "test:unit": "jest --testPathIgnorePatterns=extension.e2e.test.js",
     "test:e2e": "NODE_OPTIONS=--experimental-vm-modules jest src/__tests__/extension.e2e.test.js --runInBand"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "keywords": ["amazon", "wishlist", "tracker", "chrome-extension"],
+  "author": "Cagdas Yurekli",
+  "license": "MIT",
   "type": "commonjs",
   "devDependencies": {
     "jest": "^30.4.2",
