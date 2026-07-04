@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Amazon Wishlist Tracker</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="app-container">
+    <header class="app-header">
+      <div class="header-title">
+        <h1>Tracked Items</h1>
+        <span id="item-count" class="count-badge" hidden>0</span>
+      </div>
+      <div class="header-actions">
+        <button id="dashboard-btn" class="icon-btn" type="button" title="Open dashboard" aria-label="Open dashboard">📊</button>
+        <button id="options-btn" class="icon-btn" type="button" title="Settings" aria-label="Open settings">⚙️</button>
+      </div>
+    </header>
+
+    <main class="quick-actions">
+      <div id="status-banner" class="status-banner" role="status" aria-live="polite"></div>
+
+      <!-- Context-aware action for the current tab. Exactly one child is shown:
+           a track/import button on untracked Amazon pages, or a passive status
+           line when the page is already tracked / not trackable. -->
+      <section id="tab-action" hidden>
+        <button id="add-current-tab-btn" class="primary-btn" hidden>Track This Product</button>
+        <button id="import-wishlist-btn" class="primary-btn" hidden>Import This Wishlist</button>
+        <p id="tab-status" class="tab-status" hidden></p>
+      </section>
+
+      <section id="recent-section" hidden>
+        <h2 class="section-label">Recently updated</h2>
+        <ul id="recent-list" class="recent-list"></ul>
+      </section>
+
+      <div class="empty-state" id="empty-state" hidden>
+        <p class="empty-icon" aria-hidden="true">🛒</p>
+        <p class="empty-title">No tracked items yet</p>
+        <p>Open an Amazon product page and click “👀&nbsp;Track&nbsp;Price”.</p>
+      </div>
+
+      <button id="open-dashboard-btn" class="secondary-btn" type="button">Open Dashboard</button>
+    </main>
+  </div>
+
+  <template id="recent-item-template">
+    <li class="recent-item">
+      <a class="recent-title" target="_blank" rel="noopener noreferrer"></a>
+      <span class="price-change" hidden></span>
+      <span class="recent-price"></span>
+    </li>
+  </template>
+
+  <script type="module" src="popup.js"></script>
+</body>
+</html>

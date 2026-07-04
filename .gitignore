@@ -1,0 +1,11 @@
+# Node modules
+node_modules/
+npm-debug.log
+
+# MacOS
+.DS_Store
+
+# IDEs and Editors
+.vscode/
+.idea/
+.claude/

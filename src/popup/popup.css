@@ -1,0 +1,272 @@
+:root {
+  --bg-color: #ffffff;
+  --text-color: #333333;
+  --card-bg: rgba(255, 255, 255, 0.7);
+  --card-border: rgba(0, 0, 0, 0.08);
+  --primary: #ff9900;
+  --primary-hover: #e38800;
+  --success: #2e7d32;
+  --danger: #d32f2f;
+  --muted: #5f5f66;
+  --chip-bg: rgba(0, 0, 0, 0.05);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg-color: #121212;
+    --text-color: #e0e0e0;
+    --card-bg: rgba(30, 30, 30, 0.7);
+    --card-border: rgba(255, 255, 255, 0.12);
+    --primary: #ff9900;
+    --success: #66bb6a;
+    --danger: #ef5350;
+    --muted: #a8a8b2;
+    --chip-bg: rgba(255, 255, 255, 0.1);
+  }
+}
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+
+/* The popup viewport sizes itself from the body content, so heights must be
+   content-driven. Never use 100vh here: it is circular in an extension popup
+   and collapses the layout (seen in production with a large item list). */
+body {
+  margin: 0;
+  padding: 0;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background: var(--bg-color);
+  color: var(--text-color);
+  width: 400px;
+}
+
+.app-container {
+  display: flex;
+  flex-direction: column;
+  background:
+    radial-gradient(circle at top left, rgba(255, 153, 0, 0.16), transparent 42%),
+    linear-gradient(135deg, rgba(255, 153, 0, 0.08) 0%, rgba(255, 255, 255, 0) 100%);
+}
+
+/* ---------- Header ---------- */
+
+.app-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--card-border);
+}
+
+.header-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.app-header h1 {
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 600;
+}
+
+.count-badge {
+  background: rgba(255, 153, 0, 0.18);
+  color: var(--primary-hover);
+  font-size: 0.75rem;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+@media (prefers-color-scheme: dark) {
+  .count-badge { color: var(--primary); }
+}
+
+.header-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.icon-btn {
+  width: 34px;
+  height: 34px;
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 1.1rem;
+  transition: transform 0.2s ease;
+}
+.icon-btn:hover { transform: rotate(45deg); }
+
+/* ---------- Quick actions ---------- */
+
+.quick-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 16px 16px;
+}
+
+.tab-status {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--chip-bg);
+  color: var(--muted);
+  font-size: 0.88rem;
+  font-weight: 500;
+  text-align: center;
+}
+.tab-status.positive {
+  background: rgba(46, 125, 50, 0.12);
+  color: var(--success);
+  font-weight: 600;
+}
+
+/* ---------- Recent items ---------- */
+
+.section-label {
+  margin: 0 0 6px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
+
+.recent-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.recent-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-radius: 10px;
+}
+
+.recent-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.86rem;
+  font-weight: 500;
+  color: var(--text-color);
+  text-decoration: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.recent-title:hover { text-decoration: underline; color: var(--primary-hover); }
+
+.recent-price {
+  flex: none;
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.price-change {
+  flex: none;
+  font-size: 0.74rem;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 999px;
+}
+/* A price DROP is good news for a shopper — green. A rise is red. */
+.price-change.change-down { background: rgba(46, 125, 50, 0.14); color: var(--success); }
+.price-change.change-up { background: rgba(211, 47, 47, 0.12); color: var(--danger); }
+
+/* ---------- Empty state ---------- */
+
+.empty-state {
+  text-align: center;
+  color: var(--muted);
+  padding: 18px 24px 6px;
+  line-height: 1.45;
+}
+.empty-icon { font-size: 2.2rem; margin: 0 0 4px; }
+.empty-title {
+  color: var(--text-color);
+  font-weight: 600;
+  font-size: 1rem;
+  margin: 0 0 4px;
+}
+
+/* ---------- Status banner & buttons ---------- */
+
+.status-banner {
+  max-height: 0;
+  overflow: hidden;
+  opacity: 0;
+  padding: 0 12px;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  font-weight: 500;
+  transition: opacity 0.2s ease, max-height 0.2s ease;
+}
+.status-banner.visible {
+  max-height: 60px;
+  opacity: 1;
+  padding: 8px 12px;
+}
+.status-success { background: rgba(46, 125, 50, 0.15); color: var(--success); }
+.status-error { background: rgba(211, 47, 47, 0.15); color: var(--danger); }
+.status-info { background: var(--chip-bg); color: var(--text-color); }
+
+.primary-btn {
+  width: 100%;
+  padding: 10px;
+  background-color: var(--primary);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+.primary-btn:hover { background-color: var(--primary-hover); }
+.primary-btn:disabled { opacity: 0.7; cursor: default; }
+
+.secondary-btn {
+  width: 100%;
+  padding: 10px;
+  background: var(--card-bg);
+  color: var(--text-color);
+  border: 1px solid var(--card-border);
+  border-radius: 8px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+.secondary-btn:hover {
+  border-color: var(--primary);
+  color: var(--primary-hover);
+}
+
+/* ---------- A11y & fallbacks ---------- */
+
+:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+  .icon-btn:hover { transform: none; }
+}

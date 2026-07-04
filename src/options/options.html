@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Amazon Wishlist Tracker - Settings</title>
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <div class="options-container">
+    <header>
+      <h1>Extension Settings</h1>
+      <p>Configure alerts and manage your data.</p>
+      <div id="settings-status" class="settings-status" role="status" aria-live="polite"></div>
+    </header>
+
+    <main>
+      <section class="settings-card">
+        <h2>Defaults</h2>
+        <div class="form-group">
+          <label for="default-discount">Default Discount Alert (%)</label>
+          <input type="number" id="default-discount" min="1" max="99" placeholder="e.g. 20">
+          <small>Notify me when any tracked item drops by this percentage.</small>
+        </div>
+      </section>
+
+      <section class="settings-card">
+        <h2>Data Management</h2>
+        <p>Your data is stored locally and synced via Chrome. No account required.</p>
+        <div class="form-group">
+          <label for="history-retention">Keep Price History</label>
+          <select id="history-retention">
+            <option value="30">30 Days</option>
+            <option value="90">90 Days</option>
+            <option value="365">1 Year</option>
+            <option value="forever">Forever</option>
+          </select>
+          <small>Longer retention uses more local storage space.</small>
+        </div>
+        <div class="actions">
+          <button id="export-btn" class="primary-btn" type="button">Export Data (JSON)</button>
+          <button id="clear-history-btn" class="danger-btn" type="button">Clear Price History</button>
+        </div>
+      </section>
+    </main>
+  </div>
+  <script type="module" src="options.js"></script>
+</body>
+</html>

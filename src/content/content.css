@@ -1,0 +1,13 @@
+/* Styles for elements injected into the Amazon page */
+
+#amz-tracker-btn {
+  transition: background-color 0.2s, transform 0.1s;
+}
+
+#amz-tracker-btn:hover {
+  background-color: #e38800;
+}
+
+#amz-tracker-btn:active {
+  transform: scale(0.98);
+}

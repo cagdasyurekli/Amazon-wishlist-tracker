@@ -1,0 +1,26 @@
+{
+  "name": "amazon-wishlist-tracker",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "test": "jest --testPathIgnorePatterns=extension.e2e.test.js",
+    "test:unit": "jest --testPathIgnorePatterns=extension.e2e.test.js",
+    "test:e2e": "NODE_OPTIONS=--experimental-vm-modules jest src/__tests__/extension.e2e.test.js --runInBand"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "devDependencies": {
+    "jest": "^30.4.2",
+    "jest-environment-jsdom": "^30.4.1",
+    "puppeteer": "^25.2.1"
+  },
+  "dependencies": {
+    "jsdom": "^29.1.1"
+  }
+}

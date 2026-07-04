@@ -1,0 +1,55 @@
+{
+  "manifest_version": 3,
+  "name": "Amazon Wishlist Tracker",
+  "version": "1.0.0",
+  "description": "Premium Amazon price and stock tracker with history charts and smart alerts.",
+  "permissions": [
+    "storage",
+    "unlimitedStorage",
+    "alarms",
+    "notifications",
+    "offscreen",
+    "tabs"
+  ],
+  "host_permissions": [
+    "*://*.amazon.com/*",
+    "*://*.amazon.nl/*",
+    "*://*.amazon.de/*",
+    "*://*.amazon.fr/*",
+    "*://*.amazon.es/*",
+    "*://*.amazon.it/*",
+    "*://*.amazon.co.uk/*"
+  ],
+  "background": {
+    "service_worker": "src/background/background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_popup": "src/popup/popup.html",
+    "default_title": "Amazon Wishlist Tracker"
+  },
+  "options_ui": {
+    "page": "src/options/options.html",
+    "open_in_tab": true
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "*://*.amazon.com/*",
+        "*://*.amazon.nl/*",
+        "*://*.amazon.de/*",
+        "*://*.amazon.fr/*",
+        "*://*.amazon.es/*",
+        "*://*.amazon.it/*",
+        "*://*.amazon.co.uk/*"
+      ],
+      "css": ["src/content/content.css"],
+      "js": ["src/content/content.js"]
+    }
+  ],
+  "icons": {
+    "16": "assets/icon16.png",
+    "48": "assets/icon48.png",
+    "128": "assets/icon128.png"
+  }
+}

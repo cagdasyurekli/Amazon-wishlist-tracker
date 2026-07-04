@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Popup Preview Harness</title>
+  <style>
+    body { margin: 0; background: #d7dbe0; display: flex; justify-content: center; padding: 24px; font-family: sans-serif; }
+    .frame-wrap { box-shadow: 0 12px 40px rgba(0,0,0,0.35); border-radius: 10px; overflow: hidden; }
+    /* Like a real extension popup: height derives from content (max 600px).
+       A fixed iframe height previously masked a 100vh collapse bug. */
+    iframe { display: block; width: 400px; height: 100px; max-height: 600px; border: 0; background: #fff; }
+    p.hint { position: fixed; bottom: 8px; left: 12px; color: #555; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <div class="frame-wrap">
+    <!-- The popup runs inside an iframe at its real 400x600 size. -->
+    <iframe id="popup-frame" title="Extension popup preview"></iframe>
+  </div>
+  <p class="hint">Harness: ?empty=1 for empty state · ?fail=1 for messaging failure</p>
+  <script>
+    (async () => {
+      const res = await fetch('../src/popup/popup.html');
+      let html = await res.text();
+      // Inject a <base> so the popup's relative asset paths resolve, and the
+      // chrome.* mock so popup.js runs outside the extension context.
+      html = html.replace(
+        '<head>',
+        '<head><base href="../src/popup/"><script src="../../preview/mock-chrome.js"><\/script>'
+      );
+      const frame = document.getElementById('popup-frame');
+      frame.srcdoc = html;
+
+      // Emulate Chrome's popup sizing: grow the frame to fit content, capped
+      // at 600px, re-measured as the popup re-renders.
+      setInterval(() => {
+        const doc = frame.contentDocument;
+        if (doc?.body) {
+          frame.style.height = Math.min(600, Math.max(80, doc.body.scrollHeight)) + 'px';
+        }
+      }, 250);
+    })();
+  </script>
+</body>
+</html>
