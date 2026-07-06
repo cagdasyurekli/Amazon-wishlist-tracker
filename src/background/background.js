@@ -6,13 +6,13 @@ const AMAZON_HOST_PATTERN = /(^|\.)amazon\.(com|nl|de|fr|es|it|co\.uk)$/i;
 const ALARM_DEFINITIONS = [
   ['checkPricesAlarm', { periodInMinutes: 5 }],
   ['checkPriorityPricesAlarm', { periodInMinutes: 5 }],
-  ['checkWishlistsAlarm', { periodInMinutes: 360 }]
+  ['checkWishlistsAlarm', { periodInMinutes: 15 }]
 ];
 
 async function ensureAlarms() {
   for (const [name, config] of ALARM_DEFINITIONS) {
     const existing = await chrome.alarms.get(name);
-    if (!existing) {
+    if (!existing || existing.periodInMinutes !== config.periodInMinutes) {
       chrome.alarms.create(name, config);
     }
   }
