@@ -127,8 +127,19 @@ function parseAmazonHtml(htmlString, url) {
     soldByAmazon: false,
     currency: null,
     buyBoxPrice: null,
-    salesRank: null
+    salesRank: null,
+    isPurchased: false
   };
+
+  const purchasedTexts = [
+    'purchased on ',
+    'you own this item',
+    'gekocht op ',
+    'je hebt dit item gekocht'
+  ];
+  if (purchasedTexts.some(text => bodyText.includes(text))) {
+    data.isPurchased = true;
+  }
 
   // Extract Title
   const titleEl = doc.querySelector('#productTitle');
@@ -340,6 +351,8 @@ function parseAmazonWishlist(htmlString, url) {
       imageUrl = imgEl.src;
     }
 
+    const isPurchased = itemText.includes('purchased') || itemText.includes('gekocht') || itemText.includes('you own this item');
+
     // Only add if not already in our extracted list (duplicates sometimes exist)
     if (!items.find(i => i.id === asin)) {
       items.push({
@@ -355,6 +368,7 @@ function parseAmazonWishlist(htmlString, url) {
         wishlistPriceDropText,
         currency: currency,
         inStock: inStock,
+        isPurchased: isPurchased,
         addedAt: Date.now()
       });
     }

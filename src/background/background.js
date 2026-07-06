@@ -291,7 +291,8 @@ async function runPriceCheckBatch() {
   // Persist all run state in a single storage write.
   const updates = { [StorageKeys.LAST_SCRAPE_TIME]: Date.now() };
   if (changedItems) {
-    await saveTrackedItems(items);
+    const itemsToSave = items.filter(i => !i.isPurchased);
+    await saveTrackedItems(itemsToSave);
     updates[StorageKeys.PRICE_HISTORY] = historyObj;
   }
   if (processedCount > 0) {
@@ -366,7 +367,8 @@ async function runPriorityPriceCheckBatch() {
 
   const updates = {};
   if (changedItems) {
-    await saveTrackedItems(allItems);
+    const itemsToSave = allItems.filter(i => !i.isPurchased);
+    await saveTrackedItems(itemsToSave);
     updates[StorageKeys.PRICE_HISTORY] = historyObj;
   }
   if (processedCount > 0) {
@@ -415,6 +417,7 @@ async function runWishlistCheckBatch() {
               wishlistPriceDropAmount: extractedItem.wishlistPriceDropAmount,
               wishlistPriceDropText: extractedItem.wishlistPriceDropText,
               inStock: extractedItem.inStock,
+              isPurchased: extractedItem.isPurchased,
               buyBoxPrice: null,
               salesRank: null
             };
@@ -467,7 +470,8 @@ async function runWishlistCheckBatch() {
   }
 
   if (changedItems) {
-    await saveTrackedItems(items);
+    const itemsToSave = items.filter(i => !i.isPurchased);
+    await saveTrackedItems(itemsToSave);
     await setStorageItems({ [StorageKeys.PRICE_HISTORY]: historyObj }, StorageArea.LOCAL);
   }
 }
@@ -491,6 +495,13 @@ async function clearBackoff() {
 }
 
 function processScrapeResult(item, result, historyObj, timestamp = Date.now(), settings = {}) {
+  if (result.isPurchased) {
+    item.isPurchased = true;
+    delete historyObj[item.id];
+    sendNotification(item, `This item has been purchased and is removed from tracking.`);
+    return;
+  }
+
   if (result.price == null) {
     console.warn(`Skipping history and price alerts for ${item.id}: no price found.`);
     item.inStock = result.inStock;

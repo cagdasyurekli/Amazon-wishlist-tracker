@@ -65,6 +65,22 @@ describe('Amazon HTML Parser (Offscreen Worker)', () => {
     expect(data.soldByAmazon).toBe(true);
   });
 
+  it('should mark items as purchased if purchased text exists on the page', () => {
+    const html = `
+      <html>
+        <head><title>Product Title</title></head>
+        <body>
+          <div id="productTitle">Some Book</div>
+          <span id="kindle-price">$9.99</span>
+          <div class="a-box">Purchased on 6 Jul 2026</div>
+        </body>
+      </html>
+    `;
+    const data = parseAmazonHtml(html, 'https://amazon.com/dp/123');
+    expect(data.isPurchased).toBe(true);
+    expect(data.price).toBe(9.99);
+  });
+
   it('should parse European price formats (comma as decimal)', () => {
     const html = `
       <html>
