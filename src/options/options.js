@@ -2,6 +2,7 @@ import { getStorageData, setStorageData, getTrackedItems, StorageKeys, StorageAr
 
 document.addEventListener('DOMContentLoaded', async () => {
   const discountInput = document.getElementById('default-discount');
+  const targetPriceInput = document.getElementById('default-target-price');
   const exportBtn = document.getElementById('export-btn');
   const clearHistoryBtn = document.getElementById('clear-history-btn');
   const settingsStatus = document.getElementById('settings-status');
@@ -23,6 +24,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   const settings = await getStorageData(StorageKeys.SETTINGS) || {};
   if (settings.defaultDiscount) {
     discountInput.value = settings.defaultDiscount;
+  }
+  if (settings.defaultTargetPrice) {
+    targetPriceInput.value = settings.defaultTargetPrice;
   }
   if (settings.historyRetentionDays) {
     retentionSelect.value = settings.historyRetentionDays;
@@ -46,6 +50,23 @@ document.addEventListener('DOMContentLoaded', async () => {
     settings.defaultDiscount = value;
     await setStorageData(StorageKeys.SETTINGS, settings);
     showStatus('Default discount saved.');
+  });
+
+  targetPriceInput.addEventListener('change', async (e) => {
+    const value = parseFloat(e.target.value);
+    if (e.target.value === '') {
+      delete settings.defaultTargetPrice;
+      await setStorageData(StorageKeys.SETTINGS, settings);
+      showStatus('Default target price cleared.');
+      return;
+    }
+    if (Number.isNaN(value) || value < 0) {
+      showStatus('Enter a valid price.');
+      return;
+    }
+    settings.defaultTargetPrice = value;
+    await setStorageData(StorageKeys.SETTINGS, settings);
+    showStatus('Default target price saved.');
   });
 
   retentionSelect.addEventListener('change', async (e) => {

@@ -4,7 +4,7 @@ import { getTrackedItems, saveTrackedItem, saveTrackedItems, getStorageData, set
 const AMAZON_HOST_PATTERN = /(^|\.)amazon\.(com|nl|de|fr|es|it|co\.uk)$/i;
 
 const ALARM_DEFINITIONS = [
-  ['checkPricesAlarm', { periodInMinutes: 15 }],
+  ['checkPricesAlarm', { periodInMinutes: 5 }],
   ['checkPriorityPricesAlarm', { periodInMinutes: 5 }],
   ['checkWishlistsAlarm', { periodInMinutes: 360 }]
 ];
@@ -218,7 +218,7 @@ const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 const BACKOFF_BASE_MS = 60 * 60 * 1000;
 const BACKOFF_MAX_MS = 24 * 60 * 60 * 1000;
 const BACKOFF_ERRORS = new Set(['CAPTCHA_BLOCKED', 'RATE_LIMITED']);
-const ITEMS_PER_ALARM = 5;
+const ITEMS_PER_ALARM = 30;
 
 async function runPriceCheckBatch() {
   const backoffUntil = await getStorageData(StorageKeys.CAPTCHA_BACKOFF_UNTIL, StorageArea.LOCAL);
@@ -228,10 +228,11 @@ async function runPriceCheckBatch() {
   }
   let isBackoffActive = false;
 
-  const [items, history, cursorValue] = await Promise.all([
+  const [items, history, cursorValue, settings] = await Promise.all([
     getTrackedItems(),
     getStorageData(StorageKeys.PRICE_HISTORY, StorageArea.LOCAL),
-    getStorageData(StorageKeys.SCRAPE_CURSOR, StorageArea.LOCAL)
+    getStorageData(StorageKeys.SCRAPE_CURSOR, StorageArea.LOCAL),
+    getStorageData(StorageKeys.SETTINGS, StorageArea.SYNC)
   ]);
   if (!items || items.length === 0) return;
 
@@ -250,7 +251,7 @@ async function runPriceCheckBatch() {
         const result = await scrapeAmazonProduct(item.url);
         processedCount++;
         if (result && result.success) {
-          processScrapeResult(item, result, historyObj, now);
+          processScrapeResult(item, result, historyObj, now, settings || {});
           changedItems = true;
         } else if (result && BACKOFF_ERRORS.has(result.error)) {
           isBackoffActive = true;
@@ -305,10 +306,11 @@ async function runPriorityPriceCheckBatch() {
   
   let isBackoffActive = false;
 
-  const [allItems, history, cursorValue] = await Promise.all([
+  const [allItems, history, cursorValue, settings] = await Promise.all([
     getTrackedItems(),
     getStorageData(StorageKeys.PRICE_HISTORY, StorageArea.LOCAL),
-    getStorageData(StorageKeys.PRIORITY_SCRAPE_CURSOR, StorageArea.LOCAL)
+    getStorageData(StorageKeys.PRIORITY_SCRAPE_CURSOR, StorageArea.LOCAL),
+    getStorageData(StorageKeys.SETTINGS, StorageArea.SYNC)
   ]);
   if (!allItems) return;
 
@@ -332,7 +334,7 @@ async function runPriorityPriceCheckBatch() {
         const result = await scrapeAmazonProduct(item.url);
         processedCount++;
         if (result && result.success) {
-          processScrapeResult(item, result, historyObj, now);
+          processScrapeResult(item, result, historyObj, now, settings || {});
           changedItems = true;
           // Sync changes back to the main array
           const mainIndex = allItems.findIndex(i => i.id === item.id);
@@ -418,7 +420,7 @@ async function runWishlistCheckBatch() {
             };
             
             if (trackedItem) {
-              processScrapeResult(trackedItem, simulatedResult, historyObj, now);
+              processScrapeResult(trackedItem, simulatedResult, historyObj, now, settings || {});
               changedItems = true;
             } else if (wl.autoSync) {
               const newItem = {
@@ -440,7 +442,7 @@ async function runWishlistCheckBatch() {
               if (defaultDiscount) newItem.targetDiscountPercentage = defaultDiscount;
               
               items.push(newItem);
-              processScrapeResult(newItem, simulatedResult, historyObj, now);
+              processScrapeResult(newItem, simulatedResult, historyObj, now, settings || {});
               changedItems = true;
             }
           });
@@ -488,7 +490,7 @@ async function clearBackoff() {
   }, StorageArea.LOCAL);
 }
 
-function processScrapeResult(item, result, historyObj, timestamp = Date.now()) {
+function processScrapeResult(item, result, historyObj, timestamp = Date.now(), settings = {}) {
   if (result.price == null) {
     console.warn(`Skipping history and price alerts for ${item.id}: no price found.`);
     item.inStock = result.inStock;
@@ -530,15 +532,17 @@ function processScrapeResult(item, result, historyObj, timestamp = Date.now()) {
   let alertMessage = '';
 
   // 1. Target Price Alert
-  if (item.targetPrice && currentPrice <= item.targetPrice && previousPrice > item.targetPrice) {
+  const targetPrice = item.targetPrice || settings.defaultTargetPrice;
+  if (targetPrice && currentPrice <= targetPrice && (previousPrice == null || previousPrice > targetPrice)) {
     alertTriggered = true;
-    alertMessage = `Price dropped below your target of ${formatPrice(item.targetPrice, item.currency)}! Now: ${formatPrice(currentPrice, item.currency)}`;
+    alertMessage = `Price dropped to or below your target of ${formatPrice(targetPrice, item.currency)}! Now: ${formatPrice(currentPrice, item.currency)}`;
   }
 
   // 2. Discount Percentage Alert
-  if (item.targetDiscountPercentage && item.originalPrice) {
+  const targetDiscount = item.targetDiscountPercentage || settings.defaultDiscount;
+  if (targetDiscount && item.originalPrice) {
     const discount = ((item.originalPrice - currentPrice) / item.originalPrice) * 100;
-    if (discount >= item.targetDiscountPercentage && previousPrice > currentPrice) {
+    if (discount >= targetDiscount && previousPrice > currentPrice) {
       alertTriggered = true;
       alertMessage = `Discount reached ${discount.toFixed(1)}%! Now: ${formatPrice(currentPrice, item.currency)}`;
     }

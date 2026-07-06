@@ -74,7 +74,24 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (items.length === 0) return items;
 
     const recent = [...items]
-      .sort((a, b) => (b.updatedAt || b.lastChecked || b.addedAt || 0) - (a.updatedAt || a.lastChecked || a.addedAt || 0))
+      .map(item => {
+        const baseline = (historyObj[item.id] || []).find((dp) => Number.isFinite(dp.price))?.price || item.originalPrice;
+        let discount = 0;
+        if (Number.isFinite(baseline) && Number.isFinite(item.currentPrice) && baseline > 0) {
+          discount = ((baseline - item.currentPrice) / baseline) * 100;
+        }
+        // Fallback to wishlist drop percent if available
+        if (discount <= 0 && item.wishlistPriceDropPercent > 0) {
+          discount = item.wishlistPriceDropPercent;
+        }
+        return { ...item, _discount: discount };
+      })
+      .sort((a, b) => {
+        if (Math.abs(b._discount - a._discount) > 0.1) {
+          return b._discount - a._discount;
+        }
+        return (b.updatedAt || b.lastChecked || b.addedAt || 0) - (a.updatedAt || a.lastChecked || a.addedAt || 0);
+      })
       .slice(0, RECENT_ITEMS_COUNT);
 
     recent.forEach((item) => {
