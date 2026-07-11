@@ -182,7 +182,11 @@ Verified: all six tab contexts in the harness, add-flow state transition, 22/22 
 
 - 🟠 **Null price history/alerts (Codex, FIXED).** `processScrapeResult` now skips price history and price-based alerts when `result.price == null`, while still recording stock/check metadata.
 
-- 🟡 **Target-price alert needs a valid previous price.** The guard `previousPrice > item.targetPrice` silently skips the alert when `previousPrice` is `null` (first run) — acceptable, but document that the *first* successful check never alerts even if already below target. Consider alerting on first observation when `currentPrice <= targetPrice`.
+- 🔴 **First-run discount and target alerts silently skipped (FIXED).** The guard `previousPrice > currentPrice` silently skipped alerts when `previousPrice` was `null` (the very first run). If a user imported a wishlist of already-discounted items, they never received an alert. **Fix:** Changed the guard to `(previousPrice == null || previousPrice > currentPrice)` so that the very first successful check correctly fires alerts if thresholds are already met.
+
+- 🔴 **Badge discount logic ignored native wishlist drops (FIXED).** The badge logic previously manually calculated discounts using `(original - current) / original`. However, items imported from wishlists sometimes only expose `wishlistPriceDropPercent` and not a raw original price. **Fix:** Badge calculation and popup alerts now fall back to reading `wishlistPriceDropPercent` if a manual calculation yields 0 or fails.
+
+- 🟢 **Decoupled Badge Architecture.** Initially, the red extension badge count was manually updated at the end of each scraping batch job. This meant changes made in the Options page or Dashboard syncs left the badge stale until the next alarm. **Fix:** The badge logic is now driven purely by a `chrome.storage.onChanged` listener in `background.js` watching `TRACKED_ITEMS` and `SETTINGS`. This guarantees the badge instantly reflects the actual data state "no matter what", eliminating the need to sprinkle `updateBadgeCount()` calls throughout the codebase.
 
 - 🟢 **`prunePriceHistory` per-day logic is correct** (the `daySeen` set is re-scoped per item and points are stored chronologically), but uses local-timezone `toDateString()` — consistent within a device, may differ across synced devices. Minor.
 

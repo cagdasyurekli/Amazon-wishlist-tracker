@@ -27,3 +27,5 @@ No Git history is available in this checkout. Use short imperative commit messag
 ## Agent-Specific Instructions
 
 Read `docs/lessons_learned.md` before changing scraper, storage, dashboard, UI, security-sensitive paths, or E2E behavior. Record major findings there instead of fixing architectural pitfalls silently.
+
+**Feature Specs Rule:** Every time there is a change to the product's functionality, features, or expected behavior, you MUST update `docs/feature_specs.md` to ensure it remains the single source of truth for QA and future agents.

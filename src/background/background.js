@@ -23,11 +23,23 @@ async function ensureAlarms() {
 chrome.runtime.onInstalled.addListener(() => {
   console.log('Amazon Wishlist Tracker installed.');
   ensureAlarms();
+  updateBadgeCount();
 });
 chrome.runtime.onStartup.addListener(() => {
   ensureAlarms();
+  updateBadgeCount();
 });
 ensureAlarms();
+updateBadgeCount();
+
+chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (
+    (areaName === StorageArea.LOCAL && changes[StorageKeys.TRACKED_ITEMS]) ||
+    (areaName === StorageArea.SYNC && changes[StorageKeys.SETTINGS])
+  ) {
+    updateBadgeCount();
+  }
+});
 
 // The alarms regularly coincide (5-min priority vs 15-min batch), and each job
 // read-modify-writes the whole trackedItems array. Running them concurrently
@@ -551,11 +563,17 @@ function processScrapeResult(item, result, historyObj, timestamp = Date.now(), s
 
   // 2. Discount Percentage Alert
   const targetDiscount = item.targetDiscountPercentage || settings.defaultDiscount;
-  if (targetDiscount && item.originalPrice) {
-    const discount = ((item.originalPrice - currentPrice) / item.originalPrice) * 100;
-    if (discount >= targetDiscount && previousPrice > currentPrice) {
+  if (targetDiscount) {
+    let currentDiscount = 0;
+    if (item.originalPrice && item.originalPrice > currentPrice) {
+      currentDiscount = ((item.originalPrice - currentPrice) / item.originalPrice) * 100;
+    } else if (result.wishlistPriceDropPercent != null) {
+      currentDiscount = result.wishlistPriceDropPercent;
+    }
+    
+    if (currentDiscount >= targetDiscount && (previousPrice == null || previousPrice > currentPrice)) {
       alertTriggered = true;
-      alertMessage = `Discount reached ${discount.toFixed(1)}%! Now: ${formatPrice(currentPrice, item.currency)}`;
+      alertMessage = `Discount reached ${currentDiscount.toFixed(1)}%! Now: ${formatPrice(currentPrice, item.currency)}`;
     }
   }
 
@@ -618,3 +636,47 @@ chrome.notifications.onButtonClicked.addListener(async (notificationId, buttonIn
 chrome.notifications.onClicked.addListener(async (notificationId) => {
   await openTrackedItem(notificationId);
 });
+
+async function updateBadgeCount() {
+  try {
+    const items = await getTrackedItems() || [];
+    const settings = await getStorageData(StorageKeys.SETTINGS, StorageArea.SYNC) || {};
+    
+    let discountedCount = 0;
+    
+    for (const item of items) {
+      if (!item.currentPrice || item.isPurchased) continue;
+      
+      let isDiscounted = false;
+      
+      const targetDiscount = item.targetDiscountPercentage || settings.defaultDiscount;
+      if (targetDiscount) {
+        if (item.originalPrice && item.originalPrice > item.currentPrice) {
+          const discount = ((item.originalPrice - item.currentPrice) / item.originalPrice) * 100;
+          if (discount >= targetDiscount) {
+            isDiscounted = true;
+          }
+        }
+        if (!isDiscounted && item.wishlistPriceDropPercent != null && item.wishlistPriceDropPercent >= targetDiscount) {
+          isDiscounted = true;
+        }
+      }
+      
+      const targetPrice = item.targetPrice || settings.defaultTargetPrice;
+      if (!isDiscounted && targetPrice && item.currentPrice <= targetPrice) {
+        isDiscounted = true;
+      }
+      
+      if (isDiscounted) {
+        discountedCount++;
+      }
+    }
+    
+    const text = discountedCount > 0 ? discountedCount.toString() : '';
+    await chrome.action.setBadgeText({ text });
+    await chrome.action.setBadgeBackgroundColor({ color: '#ff0000' });
+  } catch (err) {
+    console.error('Failed to update badge count:', err);
+  }
+}
+
