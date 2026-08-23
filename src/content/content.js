@@ -1,6 +1,6 @@
 /**
  * Content script injected into Amazon pages.
- * Handles adding "Track Price" buttons and injecting Keepa-style mini charts.
+ * Handles visible-page product and wishlist discovery plus the "Track Price" action.
  */
 
 // Inject a "Track Price" button near the Amazon Buy Box

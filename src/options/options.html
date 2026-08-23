@@ -20,18 +20,23 @@
         <div class="form-group">
           <label for="default-discount">Default Discount Alert (%)</label>
           <input type="number" id="default-discount" min="1" max="99" placeholder="e.g. 20">
-          <small>Notify me when any tracked item has a discount that is configured or more.</small>
+          <small>Notify me when a tracked item reaches this discount, unless that item has its own threshold.</small>
         </div>
-        <div class="form-group">
-          <label for="default-target-price">Default Target Price</label>
-          <input type="number" id="default-target-price" step="0.01" min="0" placeholder="e.g. 5.00">
-          <small>Notify me when any tracked item drops to or below this price.</small>
+        <p class="settings-note">Target prices are set per product so values remain correct across Amazon currencies and regions.</p>
+      </section>
+
+      <section id="legacy-target-migration" class="settings-card" hidden>
+        <h2>Review a previous target price</h2>
+        <p id="legacy-target-message"></p>
+        <div class="actions">
+          <button id="legacy-target-apply-btn" class="primary-btn" type="button" hidden></button>
+          <button id="legacy-target-dismiss-btn" class="secondary-btn" type="button">Acknowledge without copying</button>
         </div>
       </section>
 
       <section class="settings-card">
         <h2>Data Management</h2>
-        <p>Your data is stored locally and synced via Chrome. No account required.</p>
+        <p>Tracked products and history stay local. Small preferences may sync through Chrome. No account required.</p>
         <div class="form-group">
           <label for="history-retention">Keep Price History</label>
           <select id="history-retention">
@@ -46,6 +51,7 @@
           <button id="export-btn" class="primary-btn" type="button">Export Data (JSON)</button>
           <button id="clear-history-btn" class="danger-btn" type="button">Clear Price History</button>
         </div>
+        <p class="settings-note">Exports are for review and safekeeping only. This version cannot restore an export; do not rely on it as a recovery backup.</p>
       </section>
     </main>
   </div>

@@ -67,7 +67,7 @@ header p {
 .settings-card {
   background: var(--card-bg);
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: 8px;
   padding: 24px;
   margin-bottom: 24px;
   box-shadow: var(--shadow);
@@ -81,13 +81,31 @@ header p {
   gap: 8px;
 }
 
-.form-group input {
+.form-group input,
+.form-group select {
   padding: 10px;
   border-radius: 6px;
   border: 1px solid var(--border);
   background: var(--input-bg);
   color: var(--text-color);
   font-size: 1rem;
+}
+
+.form-group input:focus-visible,
+.form-group select:focus-visible,
+button:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+.settings-note {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--muted);
+  font-size: 0.86rem;
+  line-height: 1.45;
 }
 
 .actions {
@@ -114,6 +132,7 @@ button:hover {
 .primary-btn:hover { background: var(--primary-hover); }
 .danger-btn { background: var(--danger); color: white; }
 .danger-btn:hover { background: var(--danger-hover); }
+.danger-btn.confirming { background: var(--danger-hover); }
 
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
   .settings-card {

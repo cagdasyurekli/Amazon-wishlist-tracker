@@ -1,4 +1,4 @@
-import { getTrackedItems, getStorageData, setStorageData, saveTrackedItem, removeTrackedItem, formatPrice, StorageKeys, StorageArea } from '../utils/storage.js';
+import { getTrackedItems, getStorageData, setStorageData, formatPrice, StorageKeys, StorageArea } from '../utils/storage.js';
 
 document.addEventListener('DOMContentLoaded', async () => {
   const itemList = document.getElementById('item-list');
@@ -12,8 +12,35 @@ document.addEventListener('DOMContentLoaded', async () => {
   const statusBanner = document.getElementById('status-banner');
   const itemSearchInput = document.getElementById('item-search-input');
   const nextChecksSummary = document.getElementById('next-checks-summary');
+  const dashboardRecovery = document.getElementById('dashboard-recovery');
+  const dashboardRecoveryMessage = document.getElementById('dashboard-recovery-message');
+  const retryDashboardLoadBtn = document.getElementById('retry-dashboard-load');
+  const legacyTargetWarning = document.getElementById('legacy-target-warning');
+  const legacyTargetOpenOptionsBtn = document.getElementById('legacy-target-open-options-btn');
 
   let statusTimer = null;
+  function sendBackgroundMessage(message) {
+    return new Promise((resolve) => {
+      chrome.runtime.sendMessage(message, (response) => {
+        if (chrome.runtime.lastError) {
+          resolve({ error: chrome.runtime.lastError.message });
+          return;
+        }
+        resolve(response || { error: 'No response from background worker' });
+      });
+    });
+  }
+
+  async function updateTrackedItem(item) {
+    const response = await sendBackgroundMessage({ type: 'UPDATE_TRACKED_ITEM', item });
+    if (!response.success) throw new Error(response.error || 'Failed to update item');
+  }
+
+  async function deleteTrackedItem(id) {
+    const response = await sendBackgroundMessage({ type: 'REMOVE_TRACKED_ITEM', id });
+    if (!response.success) throw new Error(response.error || 'Failed to remove item');
+  }
+
   function showStatus(message, type = 'info') {
     if (!statusBanner) return;
     statusBanner.textContent = message;
@@ -22,6 +49,24 @@ document.addEventListener('DOMContentLoaded', async () => {
     statusTimer = setTimeout(() => {
       statusBanner.classList.remove('visible');
     }, 4000);
+  }
+
+  function showDashboardRecovery(message = 'Dashboard data could not be loaded. Your saved tracking data was not changed.') {
+    if (dashboardRecoveryMessage) dashboardRecoveryMessage.textContent = message;
+    if (dashboardRecovery) dashboardRecovery.hidden = false;
+  }
+
+  function hideDashboardRecovery() {
+    if (dashboardRecovery) dashboardRecovery.hidden = true;
+  }
+
+  function renderLegacyTargetWarning() {
+    if (!legacyTargetWarning) return;
+    legacyTargetWarning.hidden = !Object.hasOwn(settings, 'defaultTargetPrice');
+  }
+
+  function hideLegacyTargetWarning() {
+    if (legacyTargetWarning) legacyTargetWarning.hidden = true;
   }
 
   function getPriceDropDetails(item) {
@@ -106,6 +151,21 @@ document.addEventListener('DOMContentLoaded', async () => {
     return searchable.includes(query);
   }
 
+  function itemMatchesFilter(item, filter) {
+    if (!filter || filter === 'all') return true;
+    if (filter === 'drops') return Boolean(getPriceDropDetails(item));
+    if (filter === 'priority') return Boolean(item.isPriority);
+    if (filter === 'outOfStock') return item.inStock === false;
+    if (filter === 'unchecked') return !item.lastChecked;
+    if (filter === 'targetReached') {
+      const priceReached = Number.isFinite(item.targetPrice) && Number.isFinite(item.currentPrice) && item.currentPrice <= item.targetPrice;
+      const discount = getPriceDropDetails(item)?.percent || 0;
+      const discountReached = Number.isFinite(item.targetDiscountPercentage) && discount >= item.targetDiscountPercentage;
+      return priceReached || discountReached;
+    }
+    return true;
+  }
+
   function getAlarm(name) {
     return new Promise((resolve) => {
       if (!chrome.alarms?.get) {
@@ -126,10 +186,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   async function renderNextCheckSchedule() {
     if (!nextChecksSummary) return;
 
-    const [priceAlarm, priorityAlarm, wishlistAlarm] = await Promise.all([
+    const [priceAlarm, priorityAlarm, wishlistAlarm, trackedItems] = await Promise.all([
       getAlarm('checkPricesAlarm'),
       getAlarm('checkPriorityPricesAlarm'),
-      getAlarm('checkWishlistsAlarm')
+      getAlarm('checkWishlistsAlarm'),
+      getTrackedItems()
     ]);
 
     nextChecksSummary.innerHTML = '';
@@ -142,34 +203,50 @@ document.addEventListener('DOMContentLoaded', async () => {
       chip.textContent = `${label}: ${formatTimeOnly(scheduledTime)}`;
       nextChecksSummary.appendChild(chip);
     });
+    const standardItems = trackedItems.filter(item => !item.isPriority);
+    const dueCount = standardItems.filter(item =>
+      !Number.isFinite(item.nextPriceCheckAt) || item.nextPriceCheckAt <= Date.now()
+    ).length;
+    const standardCount = standardItems.length;
+    if (standardCount > 0) {
+      const queueChip = document.createElement('span');
+      queueChip.textContent = `Standard price checks: ${dueCount} due · up to 8 per batch`;
+      nextChecksSummary.appendChild(queueChip);
+    }
   }
 
   optionsBtn.addEventListener('click', () => {
     chrome.runtime.openOptionsPage();
   });
+  legacyTargetOpenOptionsBtn?.addEventListener('click', () => {
+    chrome.runtime.openOptionsPage();
+  });
 
-  // Default discount input handling
-  const defaultDiscountInput = document.getElementById('default-discount-input');
   const sortSelect = document.getElementById('sort-select');
+  const filterSelect = document.getElementById('filter-select');
+  const PAGE_SIZE = 50;
+  let visibleItemLimit = PAGE_SIZE;
   
-  // Load settings
-  let settings = await getStorageData(StorageKeys.SETTINGS, StorageArea.SYNC) || {};
-  if (settings.defaultDiscount) {
-    defaultDiscountInput.value = settings.defaultDiscount;
-  }
-  if (sortSelect && settings.dashboardSort) {
-    const savedSortExists = Array.from(sortSelect.options).some(option => option.value === settings.dashboardSort);
-    if (savedSortExists) {
-      sortSelect.value = settings.dashboardSort;
+  let settings = {};
+  let scheduleRefreshTimer = null;
+
+  async function loadDashboardSettings() {
+    settings = await getStorageData(StorageKeys.SETTINGS, StorageArea.SYNC) || {};
+    renderLegacyTargetWarning();
+    if (sortSelect && settings.dashboardSort) {
+      const savedSortExists = Array.from(sortSelect.options).some(option => option.value === settings.dashboardSort);
+      if (savedSortExists) sortSelect.value = settings.dashboardSort;
+    }
+    if (filterSelect && settings.dashboardFilter) {
+      const savedFilterExists = Array.from(filterSelect.options).some(option => option.value === settings.dashboardFilter);
+      if (savedFilterExists) filterSelect.value = settings.dashboardFilter;
     }
   }
 
-  defaultDiscountInput.addEventListener('change', async (e) => {
-    const val = parseInt(e.target.value, 10);
-    if (!isNaN(val) && val >= 0 && val <= 100) {
-      settings.defaultDiscount = val;
-      await setStorageData(StorageKeys.SETTINGS, settings, StorageArea.SYNC);
-      showStatus('Default discount percentage updated.', 'success');
+  chrome.storage.onChanged.addListener((changes, areaName) => {
+    if (areaName === StorageArea.SYNC && changes[StorageKeys.SETTINGS]) {
+      settings = changes[StorageKeys.SETTINGS].newValue || {};
+      renderLegacyTargetWarning();
     }
   });
 
@@ -181,20 +258,18 @@ document.addEventListener('DOMContentLoaded', async () => {
     renderItems();
   });
 
-  await renderNextCheckSchedule();
-  setInterval(renderNextCheckSchedule, 60000);
-
   // Conditionally show tracking buttons based on the current page or an open wishlist tab.
   chrome.tabs.query({}, async (tabs) => {
-    const activeTab = tabs.find(tab => tab.active && tab.currentWindow) || tabs[0];
-    const isHttp = activeTab?.url?.startsWith('http');
-    const isAmazonProduct = isHttp && activeTab?.url?.includes('amazon.') && (activeTab.url.includes('/dp/') || activeTab.url.includes('/gp/product/'));
-    const isActiveAmazonWishlist = isHttp && activeTab?.url?.includes('amazon.') && activeTab.url.includes('wishlist');
-    
-    const items = await getTrackedItems();
-    const trackedWishlists = await getStorageData(StorageKeys.TRACKED_WISHLISTS, StorageArea.LOCAL) || [];
+    try {
+      const activeTab = tabs.find(tab => tab.active && tab.currentWindow) || tabs[0];
+      const isHttp = activeTab?.url?.startsWith('http');
+      const isAmazonProduct = isHttp && activeTab?.url?.includes('amazon.') && (activeTab.url.includes('/dp/') || activeTab.url.includes('/gp/product/'));
+      const isActiveAmazonWishlist = isHttp && activeTab?.url?.includes('amazon.') && activeTab.url.includes('wishlist');
 
-    if (isAmazonProduct) {
+      const items = await getTrackedItems();
+      const trackedWishlists = await getStorageData(StorageKeys.TRACKED_WISHLISTS, StorageArea.LOCAL) || [];
+
+      if (isAmazonProduct) {
       const asinMatch = activeTab.url.match(/\/(?:dp|gp\/product)\/([a-zA-Z0-9]{10})/);
       const asin = asinMatch ? asinMatch[1] : null;
       
@@ -208,24 +283,24 @@ document.addEventListener('DOMContentLoaded', async () => {
         // Not tracked yet
         addBtn.style.display = 'block';
       }
-    } else {
+      } else {
       addBtn.style.display = 'none';
     }
 
-    const dashboardImportUrl = new URLSearchParams(window.location.search).get('import') || '';
-    const openWishlistTabs = tabs.filter(tab => {
+      const dashboardImportUrl = new URLSearchParams(window.location.search).get('import') || '';
+      const openWishlistTabs = tabs.filter(tab => {
       const tabUrl = tab?.url || '';
       return tabUrl.startsWith('http') && tabUrl.includes('amazon.') && tabUrl.includes('wishlist');
     });
-    const trackedWishlistIds = trackedWishlists.map(w => typeof w === 'string' ? w : w.id).filter(Boolean);
-    const trackedOpenWishlist = openWishlistTabs.find(tab => trackedWishlistIds.includes(getWishlistId(tab.url)));
-    const wishlistUrl = isActiveAmazonWishlist
+      const trackedWishlistIds = trackedWishlists.map(w => typeof w === 'string' ? w : w.id).filter(Boolean);
+      const trackedOpenWishlist = openWishlistTabs.find(tab => trackedWishlistIds.includes(getWishlistId(tab.url)));
+      const wishlistUrl = isActiveAmazonWishlist
       ? activeTab.url
       : (dashboardImportUrl.includes('amazon.') && dashboardImportUrl.includes('wishlist') ? dashboardImportUrl : trackedOpenWishlist?.url);
-    const wishlistId = getWishlistId(wishlistUrl);
-    const wishlistInputGroup = document.querySelector('.wishlist-import-group');
+      const wishlistId = getWishlistId(wishlistUrl);
+      const wishlistInputGroup = document.querySelector('.wishlist-import-group');
 
-    if (wishlistUrl && trackWishlistTabBtn) {
+      if (wishlistUrl && trackWishlistTabBtn) {
       const isWishlistTracked = trackedWishlistIds.includes(wishlistId);
       const wishlistInput = document.getElementById('wishlist-url-input');
       if (wishlistInput) wishlistInput.value = wishlistUrl;
@@ -243,11 +318,14 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (viewTrackedWishlistBtn) viewTrackedWishlistBtn.style.display = 'none';
         if (wishlistInputGroup) wishlistInputGroup.style.display = 'none';
       }
-    } else {
+      } else {
       // If we aren't even on an Amazon page, show the manual import group
       if (trackWishlistTabBtn) trackWishlistTabBtn.style.display = 'none';
       if (viewTrackedWishlistBtn) viewTrackedWishlistBtn.style.display = 'none';
       if (wishlistInputGroup) wishlistInputGroup.style.display = 'flex';
+      }
+    } catch (_error) {
+      showDashboardRecovery();
     }
   });
 
@@ -424,8 +502,13 @@ document.addEventListener('DOMContentLoaded', async () => {
       return;
     }
 
+    const wishlistId = getWishlistId(url);
+    const syncedItems = response.items.map(item => ({
+      ...item,
+      wishlistIds: wishlistId ? [wishlistId] : []
+    }));
     setButtonProgress(buttonEl, `Saving ${response.items.length} products...`, 'info');
-    chrome.runtime.sendMessage({ type: 'BULK_ADD_TRACKED_ITEMS', items: response.items }, async (saveResponse) => {
+    chrome.runtime.sendMessage({ type: 'BULK_ADD_TRACKED_ITEMS', items: syncedItems }, async (saveResponse) => {
       buttonEl.textContent = originalText;
       buttonEl.disabled = false;
       if (chrome.runtime.lastError || !saveResponse?.success) {
@@ -491,7 +574,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     confirmBtn.textContent = 'Adding...';
     confirmBtn.disabled = true;
 
-    chrome.runtime.sendMessage({ type: 'BULK_ADD_TRACKED_ITEMS', items: selectedItems }, async (response) => {
+    const wishlistId = getWishlistId(currentWishlistUrl);
+    const sourcedItems = selectedItems.map(item => ({
+      ...item,
+      wishlistIds: wishlistId ? [wishlistId] : []
+    }));
+    chrome.runtime.sendMessage({ type: 'BULK_ADD_TRACKED_ITEMS', items: sourcedItems }, async (response) => {
       confirmBtn.textContent = 'Confirm Tracking';
       confirmBtn.disabled = false;
       
@@ -550,15 +638,31 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (sortSelect) {
     sortSelect.addEventListener('change', async () => {
       settings.dashboardSort = sortSelect.value;
+      visibleItemLimit = PAGE_SIZE;
+      if (itemList) itemList.scrollTop = 0;
       renderItems();
       await setStorageData(StorageKeys.SETTINGS, settings, StorageArea.SYNC);
     });
   }
   if (itemSearchInput) {
-    itemSearchInput.addEventListener('input', debounce(() => renderItems()));
+    itemSearchInput.addEventListener('input', debounce(() => {
+      visibleItemLimit = PAGE_SIZE;
+      if (itemList) itemList.scrollTop = 0;
+      renderItems();
+    }));
+  }
+  if (filterSelect) {
+    filterSelect.addEventListener('change', async () => {
+      settings.dashboardFilter = filterSelect.value;
+      visibleItemLimit = PAGE_SIZE;
+      if (itemList) itemList.scrollTop = 0;
+      renderItems();
+      await setStorageData(StorageKeys.SETTINGS, settings, StorageArea.SYNC);
+    });
   }
 
   async function renderItems() {
+    const savedScrollTop = itemList ? itemList.scrollTop : 0;
     itemList.innerHTML = '';
     const allItems = await getTrackedItems();
     let items = [...allItems];
@@ -607,7 +711,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     const query = (itemSearchInput?.value || '').trim().toLowerCase();
     items = items.filter(item => itemMatchesQuery(item, query));
-    if (mainTitle && query) {
+    const activeFilter = filterSelect?.value || 'all';
+    items = items.filter(item => itemMatchesFilter(item, activeFilter));
+    if (mainTitle && (query || activeFilter !== 'all')) {
       mainTitle.textContent = `Tracked Items (${items.length} of ${allItems.length})`;
     }
 
@@ -636,7 +742,10 @@ document.addEventListener('DOMContentLoaded', async () => {
       items.sort((a, b) => (b.addedAt || 0) - (a.addedAt || 0));
     }
 
-    items.forEach((item) => {
+    const filteredItemCount = items.length;
+    const visibleItems = items.slice(0, visibleItemLimit);
+
+    visibleItems.forEach((item) => {
       const clone = template.content.cloneNode(true);
       const card = clone.querySelector('.item-card');
       card.dataset.id = item.id;
@@ -646,7 +755,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         chartBtn.addEventListener('click', () => {
           card.classList.toggle('show-graph');
           if (card.classList.contains('show-graph')) {
-            requestAnimationFrame(() => renderSparkline(canvas, itemHistory, item.currency));
+            requestAnimationFrame(prepareChart);
           }
         });
       }
@@ -669,18 +778,25 @@ document.addEventListener('DOMContentLoaded', async () => {
             return;
           }
         }
-        
-        item.isPriority = !item.isPriority;
-        await saveTrackedItem({ id: item.id, isPriority: item.isPriority });
-        
-        priorityBtn.textContent = item.isPriority ? '⭐️' : '☆';
-        priorityBtn.classList.toggle('active', item.isPriority);
-        priorityBtn.title = item.isPriority ? 'Remove from Priority Tracking' : 'Add to Priority Tracking (Fast Check)';
-        showStatus(item.isPriority ? 'Added to Priority Tracking' : 'Removed from Priority Tracking', 'success');
-        
-        // Update in-memory array for limit checking
-        const index = items.findIndex(i => i.id === item.id);
-        if (index > -1) items[index].isPriority = item.isPriority;
+
+        const nextPriority = !item.isPriority;
+        priorityBtn.disabled = true;
+        try {
+          await updateTrackedItem({ id: item.id, isPriority: nextPriority });
+          item.isPriority = nextPriority;
+          priorityBtn.textContent = item.isPriority ? '⭐️' : '☆';
+          priorityBtn.classList.toggle('active', item.isPriority);
+          priorityBtn.title = item.isPriority ? 'Remove from Priority Tracking' : 'Add to Priority Tracking (Fast Check)';
+          showStatus(item.isPriority ? 'Added to Priority Tracking' : 'Removed from Priority Tracking', 'success');
+
+          // Update in-memory array for limit checking only after persistence succeeds.
+          const index = items.findIndex(i => i.id === item.id);
+          if (index > -1) items[index].isPriority = item.isPriority;
+        } catch (_error) {
+          showStatus('Could not update Priority Tracking. Try again.', 'error');
+        } finally {
+          priorityBtn.disabled = false;
+        }
       });
 
       const titleEl = clone.querySelector('.item-title');
@@ -720,6 +836,14 @@ document.addEventListener('DOMContentLoaded', async () => {
         lastCheckedEl.textContent = `Last checked: ${formatTimestamp(item.lastChecked)}`;
       }
 
+      const nextCheckEl = clone.querySelector('.next-check');
+      if (nextCheckEl) {
+        nextCheckEl.textContent = item.isPriority && !Number.isFinite(item.nextPriceCheckAt)
+          ? 'Next check: Priority queue'
+          : `Next check: ${formatNextCheck(item.nextPriceCheckAt)}`;
+        nextCheckEl.title = item.checkCadence || (item.isPriority ? 'Priority · 2m queue' : 'Queued for adaptive checking');
+      }
+
       const stockEl = clone.querySelector('.stock-status');
       if (item.inStock) {
         stockEl.textContent = 'In Stock';
@@ -733,6 +857,16 @@ document.addEventListener('DOMContentLoaded', async () => {
       const chartMeta = clone.querySelector('.chart-meta');
       const chartSamples = clone.querySelector('.chart-samples');
       const itemHistory = history[item.id] || [];
+      let chartPrepared = false;
+      const prepareChart = () => {
+        if (chartPrepared) return;
+        chartPrepared = true;
+        if (itemHistory.length > 0) {
+          renderChartMeta(chartMeta, itemHistory, item.currency);
+          renderChartSamples(chartSamples, itemHistory, item.currency);
+          renderSparkline(canvas, itemHistory, item.currency);
+        }
+      };
       if (itemHistory.length === 0) {
         const placeholder = document.createElement('p');
         placeholder.className = 'chart-empty';
@@ -742,18 +876,34 @@ document.addEventListener('DOMContentLoaded', async () => {
         canvas.replaceWith(placeholder);
         if (chartMeta) chartMeta.style.display = 'none';
         if (chartSamples) chartSamples.style.display = 'none';
-      } else {
-        renderChartMeta(chartMeta, itemHistory, item.currency);
-        renderChartSamples(chartSamples, itemHistory, item.currency);
       }
 
-      clone.querySelector('.remove-btn').addEventListener('click', async () => {
-        await removeTrackedItem(item.id);
-        card.remove();
-        if (itemList.querySelectorAll('.item-card').length === 0) {
-          emptyState.style.display = 'block';
+      const removeBtn = clone.querySelector('.remove-btn');
+      let removeConfirmTimer = null;
+      removeBtn.addEventListener('click', async () => {
+        if (!removeBtn.classList.contains('confirming')) {
+          removeBtn.classList.add('confirming');
+          removeBtn.textContent = 'Confirm remove';
+          clearTimeout(removeConfirmTimer);
+          removeConfirmTimer = setTimeout(() => {
+            removeBtn.classList.remove('confirming');
+            removeBtn.textContent = 'Remove';
+          }, 3500);
+          return;
         }
-        showStatus('Item removed.', 'info');
+
+        clearTimeout(removeConfirmTimer);
+        removeBtn.disabled = true;
+        try {
+          await deleteTrackedItem(item.id);
+          await renderItems();
+          showStatus('Item removed.', 'info');
+        } catch (_error) {
+          removeBtn.classList.remove('confirming');
+          removeBtn.textContent = 'Remove';
+          removeBtn.disabled = false;
+          showStatus('Could not remove this item. Try again.', 'error');
+        }
       });
 
       const detailsBtn = clone.querySelector('.details-btn');
@@ -809,30 +959,108 @@ document.addEventListener('DOMContentLoaded', async () => {
         });
       }
 
-      clone.querySelector('.edit-btn').addEventListener('click', async () => {
-        const newTarget = prompt('Enter new target price:', item.targetPrice || item.currentPrice || '');
-        if (newTarget === null) return;
-        const parsed = parseFloat(newTarget);
-        if (!Number.isFinite(parsed) || parsed <= 0) {
-          showStatus('Please enter a valid price.', 'error');
+      const editBtn = clone.querySelector('.edit-btn');
+      const targetEditor = clone.querySelector('.target-editor');
+      const targetInput = clone.querySelector('.target-editor-input');
+      const targetSaveBtn = clone.querySelector('.target-save-btn');
+      const targetCancelBtn = clone.querySelector('.target-cancel-btn');
+
+      const closeTargetEditor = () => {
+        targetEditor.hidden = true;
+        editBtn.disabled = false;
+      };
+
+      editBtn.addEventListener('click', () => {
+        targetInput.value = Number.isFinite(item.targetPrice) ? item.targetPrice : '';
+        targetEditor.hidden = false;
+        editBtn.disabled = true;
+        targetInput.focus();
+      });
+
+      targetCancelBtn.addEventListener('click', closeTargetEditor);
+      targetEditor.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const rawValue = targetInput.value.trim();
+        const parsed = rawValue === '' ? null : Number(rawValue);
+        if (parsed !== null && (!Number.isFinite(parsed) || parsed <= 0)) {
+          showStatus('Please enter a valid price or leave it empty to clear.', 'error');
           return;
         }
-        item.targetPrice = parsed;
-        // Persist via the serialized single-item save so we don't clobber a
-        // concurrent background price update with a stale array.
-        await saveTrackedItem({ id: item.id, targetPrice: parsed });
-        targetEl.textContent = `Target: ${formatPrice(parsed, item.currency)}`;
-        showStatus('Target price updated.', 'success');
+
+        targetSaveBtn.disabled = true;
+        try {
+          await updateTrackedItem({ id: item.id, targetPrice: parsed });
+          item.targetPrice = parsed;
+          targetEl.textContent = parsed ? `Target: ${formatPrice(parsed, item.currency)}` : 'No target set';
+          closeTargetEditor();
+          showStatus(parsed ? 'Target price updated.' : 'Target price cleared.', 'success');
+        } catch (_error) {
+          showStatus('Could not update the target price. Try again.', 'error');
+        } finally {
+          targetSaveBtn.disabled = false;
+        }
       });
 
       itemList.appendChild(clone);
       if (appContainer.classList.contains('show-all-charts')) {
-        requestAnimationFrame(() => renderSparkline(canvas, itemHistory, item.currency));
+        requestAnimationFrame(prepareChart);
       }
     });
+
+    const pagination = document.createElement('div');
+    pagination.className = 'list-pagination';
+    const paginationText = document.createElement('span');
+    paginationText.textContent = `Showing ${visibleItems.length} of ${filteredItemCount}`;
+    pagination.appendChild(paginationText);
+    if (visibleItems.length < filteredItemCount) {
+      const loadMoreBtn = document.createElement('button');
+      loadMoreBtn.type = 'button';
+      loadMoreBtn.textContent = `Load ${Math.min(PAGE_SIZE, filteredItemCount - visibleItems.length)} more`;
+      loadMoreBtn.addEventListener('click', () => {
+        visibleItemLimit += PAGE_SIZE;
+        renderItems();
+      });
+      pagination.appendChild(loadMoreBtn);
+    }
+    itemList.appendChild(pagination);
+
+    if (savedScrollTop > 0) {
+      requestAnimationFrame(() => {
+        if (itemList) itemList.scrollTop = savedScrollTop;
+      });
+    }
   }
 
-  await renderItems();
+  async function initializeDashboard() {
+    try {
+      await loadDashboardSettings();
+      await renderNextCheckSchedule();
+      await renderItems();
+      hideDashboardRecovery();
+      if (!scheduleRefreshTimer) {
+        scheduleRefreshTimer = setInterval(() => {
+          renderNextCheckSchedule().catch(() => showDashboardRecovery());
+        }, 60000);
+      }
+    } catch (_error) {
+      hideLegacyTargetWarning();
+      showDashboardRecovery();
+      setEmptyState('Dashboard could not load.', 'Your saved tracking data was not changed. Select Retry to try again.');
+      emptyState.style.display = 'block';
+      itemList.replaceChildren(emptyState);
+    }
+  }
+
+  retryDashboardLoadBtn?.addEventListener('click', async () => {
+    retryDashboardLoadBtn.disabled = true;
+    try {
+      await initializeDashboard();
+    } finally {
+      retryDashboardLoadBtn.disabled = false;
+    }
+  });
+
+  await initializeDashboard();
 
   // Auto-trigger import if launched with ?import=URL
   const urlParams = new URLSearchParams(window.location.search);
@@ -855,6 +1083,15 @@ function formatTimeOnly(timestamp) {
   const date = new Date(timestamp);
   if (Number.isNaN(date.getTime())) return 'not scheduled';
   return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+function formatNextCheck(timestamp) {
+  if (!Number.isFinite(timestamp) || timestamp <= Date.now()) return 'Due now';
+  const minutes = Math.max(1, Math.ceil((timestamp - Date.now()) / 60000));
+  if (minutes < 60) return `in ${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  return remainingMinutes ? `in ${hours}h ${remainingMinutes}m` : `in ${hours}h`;
 }
 
 function getValidHistory(dataPoints) {

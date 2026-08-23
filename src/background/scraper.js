@@ -122,21 +122,22 @@ export async function scrapeAmazonProduct(url) {
 
 /**
  * Fetches an Amazon wishlist page and extracts its items. Supports pagination.
- * @param {string} url 
+ * @param {string} url
+ * @param {{maxPages?: number}} options
  * @returns {Promise<Object>} Extracted wishlist items
  */
-export async function scrapeAmazonWishlist(url) {
+export async function scrapeAmazonWishlist(url, options = {}) {
   let allItems = [];
   let currentUrl = url;
   let pageCount = 0;
   let consecutiveEmptyPages = 0;
-  const MAX_PAGES = 150;
+  const maxPages = Number.isInteger(options.maxPages) && options.maxPages > 0 ? options.maxPages : 150;
   
   // Helper for random delay (Jitter)
   const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
   try {
-    while (currentUrl && pageCount < MAX_PAGES) {
+    while (currentUrl && pageCount < maxPages) {
       let abortTimeout;
       const fetchUrl = new URL(currentUrl);
       if (!AMAZON_HOST_PATTERN.test(fetchUrl.hostname)) {
@@ -218,7 +219,7 @@ export async function scrapeAmazonWishlist(url) {
       pageCount++;
 
       // If there's a next page, add a delay to prevent bot bans
-      if (currentUrl && pageCount < MAX_PAGES) {
+      if (currentUrl && pageCount < maxPages) {
         const jitter = Math.floor(Math.random() * 2000) + 1500; // 1.5 to 3.5 seconds
         await delay(jitter);
       }
@@ -226,13 +227,15 @@ export async function scrapeAmazonWishlist(url) {
 
     return {
       success: true,
-      items: allItems
+      items: allItems,
+      complete: !currentUrl,
+      nextPageUrl: currentUrl
     };
   } catch (error) {
     console.error('Error scraping Amazon wishlist:', error);
     // If we managed to get some items before failing, return them
     if (allItems.length > 0) {
-      return { success: true, items: allItems };
+      return { success: true, items: allItems, complete: false, nextPageUrl: currentUrl, error: error.message };
     }
     return {
       success: false,

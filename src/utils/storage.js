@@ -21,8 +21,14 @@ export const StorageKeys = {
   LAST_SCRAPE_TIME: 'lastScrapeTime',
   SCRAPE_CURSOR: 'scrapeCursor',
   PRIORITY_SCRAPE_CURSOR: 'priorityScrapeCursor',
+  WISHLIST_SCRAPE_CURSOR: 'wishlistScrapeCursor',
+  WISHLIST_SCRAPE_STATE: 'wishlistScrapeState',
   CAPTCHA_BACKOFF_UNTIL: 'captchaBackoffUntil',
-  CAPTCHA_BACKOFF_ATTEMPTS: 'captchaBackoffAttempts'
+  CAPTCHA_BACKOFF_ATTEMPTS: 'captchaBackoffAttempts',
+
+  // Records only an opaque fingerprint and outcome for the one-time legacy
+  // target notice. It deliberately never stores the old target value itself.
+  LEGACY_TARGET_NOTICE: 'legacyTargetNotice'
 };
 
 /**
@@ -108,14 +114,45 @@ function withSaveLock(fn) {
 }
 
 /**
+ * Performs an atomic read-modify-write of tracked items within this extension
+ * context. Use this for batch merges so long-running jobs apply their results
+ * to the latest collection instead of replacing it with a stale snapshot.
+ * @param {(items: Array<Object>) => Array<Object>} updater
+ * @returns {Promise<void>}
+ */
+export function updateTrackedItems(updater) {
+  return withSaveLock(async () => {
+    const items = await getTrackedItems();
+    const next = updater(items);
+    await setStorageData(StorageKeys.TRACKED_ITEMS, next, StorageArea.LOCAL);
+  });
+}
+
+/**
+ * Runs a validated tracked-item mutation under the same lock as ordinary
+ * updates. Returning `{ commit: false }` leaves storage untouched, which is
+ * useful when the latest collection no longer meets a UI-time predicate.
+ * @param {(items: Array<Object>) => {commit: boolean, items?: Array<Object>, result?: any}} updater
+ * @returns {Promise<any>} the updater's result
+ */
+export function updateTrackedItemsIf(updater) {
+  return withSaveLock(async () => {
+    const items = await getTrackedItems();
+    const outcome = updater(items) || { commit: false };
+    if (!outcome.commit) return outcome.result;
+    await setStorageData(StorageKeys.TRACKED_ITEMS, outcome.items, StorageArea.LOCAL);
+    return outcome.result;
+  });
+}
+
+/**
  * Adds or updates a tracked item. Serialized via the shared mutex to prevent
  * concurrent read-modify-write races on the trackedItems array.
  * @param {Object} item
  * @returns {Promise<void>} resolves once this item's write has persisted
  */
 export function saveTrackedItem(item) {
-  return withSaveLock(async () => {
-    const items = await getTrackedItems();
+  return updateTrackedItems((items) => {
     const existingIndex = items.findIndex(i => i.id === item.id);
 
     if (existingIndex > -1) {
@@ -124,18 +161,8 @@ export function saveTrackedItem(item) {
       items.push({ ...item, addedAt: Date.now(), updatedAt: Date.now() });
     }
 
-    await setStorageData(StorageKeys.TRACKED_ITEMS, items, StorageArea.LOCAL);
+    return items;
   });
-}
-
-/**
- * Replaces the tracked item collection in a single storage write.
- * Use this for background batch jobs so sync storage is not rewritten once per
- * scraped product.
- * @param {Array<Object>} items
- */
-export async function saveTrackedItems(items) {
-  await setStorageData(StorageKeys.TRACKED_ITEMS, items, StorageArea.LOCAL);
 }
 
 /**
@@ -146,16 +173,11 @@ export async function saveTrackedItems(items) {
  * @returns {Promise<void>}
  */
 export function removeTrackedItem(id) {
-  return withSaveLock(async () => {
-    const items = await getTrackedItems();
-    const next = items.filter(i => i.id !== id);
-    await setStorageData(StorageKeys.TRACKED_ITEMS, next, StorageArea.LOCAL);
-  });
+  return updateTrackedItems((items) => items.filter(i => i.id !== id));
 }
 
 /**
- * Prunes old price history to prevent local storage from exceeding limits.
- * Keeps only 1 data point per day for data older than 30 days.
+ * Prunes price history outside the configured retention period.
  */
 export async function prunePriceHistory() {
   const settings = await getStorageData(StorageKeys.SETTINGS, StorageArea.SYNC) || {};
@@ -176,18 +198,10 @@ export async function prunePriceHistory() {
     const dataPoints = history[itemId];
     if (!Array.isArray(dataPoints)) continue;
 
-    const daySeen = new Set();
     history[itemId] = dataPoints.filter(dp => {
-      if (dp.timestamp > cutoffTime) return true; // Keep recent
-
-      // For old data, keep only if it's the first one we see for that day
-      const day = new Date(dp.timestamp).toDateString();
-      if (!daySeen.has(day)) {
-        daySeen.add(day);
-        return true;
-      }
-      prunedCount++;
-      return false;
+      const keep = Number.isFinite(dp.timestamp) && dp.timestamp >= cutoffTime;
+      if (!keep) prunedCount++;
+      return keep;
     });
   }
 

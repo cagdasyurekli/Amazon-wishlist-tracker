@@ -25,9 +25,16 @@
             <option value="discountDesc">Discount %</option>
             </select>
           </label>
-          <label class="toolbar-field discount-field">
-            <span>Default Discount</span>
-            <span class="percent-input"><input type="number" id="default-discount-input" min="0" max="100">%</span>
+          <label class="toolbar-field">
+            <span>Filter</span>
+            <select id="filter-select">
+              <option value="all">All items</option>
+              <option value="drops">Price drops</option>
+              <option value="priority">Priority</option>
+              <option value="outOfStock">Out of stock</option>
+              <option value="targetReached">Target reached</option>
+              <option value="unchecked">Not checked yet</option>
+            </select>
           </label>
           <button id="toggle-all-charts-btn" class="secondary-btn" type="button">Show All Charts</button>
         </div>
@@ -40,6 +47,16 @@
 
     <div id="captcha-warning-banner" style="display: none; background-color: rgba(255, 60, 60, 0.15); border: 1px solid rgba(255, 60, 60, 0.4); padding: 12px; border-radius: 8px; margin: 15px 15px 0 15px; color: #ffbbbb; font-size: 0.85rem; text-align: center;">
       ⚠️ Tracking temporarily paused by Amazon to prevent bot traffic. Resuming automatically at <strong id="captcha-resume-time"></strong>.
+    </div>
+
+    <div id="dashboard-recovery" class="dashboard-recovery" role="alert" hidden>
+      <span id="dashboard-recovery-message">Dashboard data could not be loaded. Your saved tracking data was not changed.</span>
+      <button id="retry-dashboard-load" class="secondary-btn" type="button">Retry</button>
+    </div>
+
+    <div id="legacy-target-warning" class="legacy-target-warning" role="alert" hidden>
+      <span>Old global target alerts are paused because their currency is unknown. Review the previous target price before relying on target alerts.</span>
+      <button id="legacy-target-open-options-btn" class="secondary-btn" type="button">Open Extension Settings</button>
     </div>
 
     <main class="item-list" id="item-list">
@@ -76,7 +93,7 @@
         <input type="checkbox" id="select-all-checkbox" checked> Select All
       </label>
       <label style="cursor: pointer; display: flex; align-items: center; gap: 8px; font-size: 0.85rem; color: #ff9900;">
-        <input type="checkbox" id="auto-sync-checkbox" title="Automatically track new items added to this wishlist during the 6-hour sync"> Auto-Sync New Items
+        <input type="checkbox" id="auto-sync-checkbox" title="Automatically add new items and stop tracking removed wishlist-only items during periodic sync"> Keep List in Sync
       </label>
       <span id="selection-counter" style="font-size: 0.85rem; color: #aaa;">0 / 0 Selected</span>
     </div>
@@ -109,7 +126,7 @@
           <span>Target Price:</span>
           <span id="details-target-price"></span>
         </div>
-        <div id="details-discount-info" style="display: none; justify-content: flex-end; margin-bottom: 15px; color: #ffbbbb; font-size: 12px; font-weight: bold;"></div>
+        <div id="details-discount-info" style="display: none; justify-content: flex-end; margin-bottom: 15px; color: #2e7d32; font-size: 12px; font-weight: bold;"></div>
         <h3 style="margin: 0 0 10px 0; font-size: 13px; color: #aaa;">Price History</h3>
         <div id="details-history-list" style="font-size: 12px; max-height: 200px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px;">
           <!-- History entries will be injected here -->
@@ -127,15 +144,24 @@
           <div class="item-price" style="font-size: 1.25rem; font-weight: bold; color: #ff9900;">$0.00</div>
         </div>
       </div>
-      <div class="discount-info" style="display: none; margin-top: 6px; font-size: 0.85rem; padding: 4px 8px; border-left: 3px solid #ffbbbb; background: rgba(255, 60, 60, 0.05);">
-        <strong class="discount-badge" style="color: #ffbbbb;">Price dropped 0%</strong>
+      <div class="discount-info" style="display: none; margin-top: 6px; font-size: 0.85rem; padding: 4px 8px; border-left: 3px solid #2e7d32; background: rgba(46, 125, 50, 0.08);">
+        <strong class="discount-badge" style="color: #2e7d32;">Price dropped 0%</strong>
         <span style="color: #aaa; margin-left: 4px;">(was <span class="original-price">$0.00</span> when added to List)</span>
       </div>
       <div class="item-details">
         <span class="stock-status in-stock">In Stock</span>
         <span class="last-checked">Last checked: Not yet</span>
+        <span class="next-check">Next check: Queued</span>
         <span class="target-price">Target: $0.00</span>
       </div>
+      <form class="target-editor" hidden>
+        <label>
+          <span>Target price</span>
+          <input class="target-editor-input" type="number" min="0.01" step="0.01" placeholder="Leave empty to clear">
+        </label>
+        <button class="target-save-btn" type="submit">Save</button>
+        <button class="target-cancel-btn" type="button">Cancel</button>
+      </form>
       <div class="chart-container">
         <div class="chart-meta" aria-live="polite"></div>
         <canvas class="price-chart"></canvas>
