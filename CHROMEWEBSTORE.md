@@ -1,6 +1,9 @@
 # Chrome Web Store Listing — Amazon Wishlist Tracker
 
-> Last Updated: 2026-07-04
+> Last Updated: 2026-08-23
+>
+> Draft listing copy only. For installation and current product behavior, use
+> `docs/USER_MANUAL.md` and verify claims against source/tests.
 
 ## Store Listing
 
@@ -16,24 +19,24 @@ Premium Amazon price and stock tracker with history charts and smart alerts.
 Amazon Wishlist Tracker is a privacy-first, powerful tool that automatically tracks prices, stock availability, and price drops for any product on Amazon directly from your browser. 
 
 Features:
-- Track entire Amazon Wishlists with a single click
+- Import selected products from public/shared Amazon wishlists and optionally keep the list in sync
 - Monitor individual products directly from any Amazon product page
 - View detailed price history sparklines to know if you're getting a good deal
 - Receive automatic notifications for price drops and restocks
 - Support for multiple Amazon regions (.com, .nl, .de, .fr, .es, .it, .co.uk)
-- 100% Privacy-focused: All tracking data and price history is stored entirely locally on your device. No cloud syncing, no data collection, and no external accounts required.
+- Privacy-focused: tracked products and price history stay in the local Chrome profile. Small preferences (such as dashboard view and discount settings) may use Chrome sync when enabled; tracked products and history do not sync. No product backend, analytics collection, or external account is required.
 
 How to use:
 1. Navigate to any Amazon product page and click the "👀 Track Price" button.
-2. Alternatively, open your Amazon Wishlist and click "Track This Wishlist" in the extension Dashboard to import all items at once.
-3. Open the extension popup to view your tracked items, current prices, and visual price histories.
+2. Alternatively, open a public/shared Amazon wishlist and click "Track This Wishlist" in the Dashboard to select items for import.
+3. Open the extension popup for highlights, or the Dashboard for the full list, targets, filters, and price-history charts.
 4. Set up custom discount alerts and sit back while the extension checks prices in the background.
 
 Privacy Note:
-Your data is yours. This extension operates completely locally. It fetches price data directly from Amazon to your browser. No data is ever sent to third-party servers.
-
-Support:
-If you find this tool helpful, consider supporting the developer via the options menu!
+Your tracked products and price history stay in the local Chrome profile and do not
+sync. Small preferences, such as dashboard view and discount settings, may use Chrome
+sync when browser sync is enabled. The extension fetches price data directly from
+supported Amazon domains and has no product backend or analytics service.
 
 
 **Category**
@@ -63,7 +66,7 @@ English
 
 
 ### Screenshot Notes
-- **Screenshot 1**: Show the extension popup open with a list of tracked items and price history sparklines.
+- **Screenshot 1**: Show the extension popup open with tracked-item highlights.
 - **Screenshot 2**: Show the Dashboard importing a large wishlist with the "Price dropped" badges visible.
 - **Screenshot 3**: Show the "👀 Track Price" button injected into an Amazon product page.
 - **Screenshot 4**: Show the options page highlighting the privacy-first local storage settings.
@@ -97,7 +100,10 @@ English
 ## Privacy Policy
 
 **Privacy Policy URL** 
-*Recommendation: Host a simple text page on GitHub Pages or Notion stating that "Amazon Wishlist Tracker stores all data locally and transmits absolutely no personal information or tracking data to any third parties."*
+*Recommendation: Host a privacy-policy page that says tracked products and history stay
+local; only small preferences may use Chrome sync when the user enables browser sync;
+and price requests go directly to supported Amazon domains. Do not claim that all data
+is local-only or that nothing can sync.*
 
 
 ## Distribution
@@ -127,4 +133,3 @@ English
 | Version | Date | Changes | Status |
 |---------|------|---------|--------|
 | 1.0.0 | 2026-07-04 | Initial Release | Draft |
-

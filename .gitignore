@@ -1,6 +1,7 @@
 # Node modules
 node_modules/
 npm-debug.log
+artifacts/
 
 # MacOS
 .DS_Store

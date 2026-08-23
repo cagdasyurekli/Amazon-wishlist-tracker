@@ -1,64 +1,63 @@
 # Amazon Wishlist Tracker
 
-A privacy-first Manifest V3 Chrome extension to track Amazon product and wishlist prices locally. All data stays on your machine, with no external backend or tracking.
+Amazon Wishlist Tracker is a Manifest V3 Chrome extension that tracks prices and
+stock for individual Amazon products and public/shared wishlists. It runs without a
+backend or analytics service.
 
-## Key Features
+Tracked products, wishlists, price history, and scrape state stay in the local Chrome
+profile. Small preferences use `chrome.storage.sync` and may follow the user's Chrome
+profile when browser sync is enabled.
 
-- **Local Storage**: All your tracked items, price history, and settings are saved securely in your browser using `chrome.storage.local`.
-- **Wishlist Sync**: Easily import entire Amazon wishlists and keep track of price drops across multiple items.
-- **Price History Charts**: View interactive sparkline charts of price trends right in the extension popup and detailed charts in the dashboard.
-- **Restock Alerts**: Get notified when an out-of-stock item you're tracking becomes available again.
-- **Priority Tracking**: Mark items as priority for more frequent background scraping.
-- **Multi-region Support**: Works with `.com`, `.co.uk`, `.de`, `.fr`, `.es`, `.it`, and `.nl` Amazon domains.
+## Features
 
-## Installation
+- Track individual products on supported Amazon marketplaces.
+- Import selected items from public/shared wishlists and optionally keep a list in sync.
+- Set per-product target prices and a default discount alert threshold.
+- Prioritize up to 10 products for more frequent checks.
+- Search, sort, filter, inspect price history, and review next-check status.
+- Receive target, discount, restock, and purchased-item notifications.
+- Export tracked items and history as JSON and configure history retention.
 
-Because this is a locally-developed extension without a build step, you can load it directly into Chrome:
+Supported marketplaces: `amazon.com`, `amazon.co.uk`, `amazon.de`, `amazon.fr`,
+`amazon.es`, `amazon.it`, and `amazon.nl`.
 
-1. Open Chrome and navigate to `chrome://extensions/`.
-2. Enable **Developer mode** (toggle switch in the top right corner).
-3. Click the **Load unpacked** button.
-4. Select the directory containing this repository.
-5. The extension will appear in your toolbar. Pin it for quick access!
+## Install and use
 
-## Usage
+There is no build step. Open `chrome://extensions/`, enable **Developer mode**, choose
+**Load unpacked**, and select this repository root—the directory containing
+`manifest.json`.
 
-- **Track a Product**: Navigate to any Amazon product page. Click the extension icon and select "Track This Product".
-- **Import a Wishlist**: Navigate to an Amazon wishlist page. Click the extension icon and select "Import This Wishlist", or use the `Sync Wishlist` feature in the dashboard.
-- **Dashboard**: Click the "View All" button in the popup to open the Dashboard. Here you can search, filter, view detailed price history, and manage your tracked items.
+For first use, common workflows, safe updates, privacy details, limitations, and
+troubleshooting, read the [User Manual](docs/USER_MANUAL.md).
 
 ## Development
 
-There is no build step. The source code is executed directly.
+Install the lockfile-defined dependencies and run both verification layers:
 
-### Running Tests
+```bash
+npm ci
+npm test
+npm run test:e2e
+npm run visual:qa
+```
 
-To run the test suite, you need Node.js installed.
+`npm test` runs the Jest unit/parser suite. `npm run test:e2e` launches Chromium,
+loads the unpacked extension, and checks selected startup and UI contracts. Source
+files are executed directly by Chrome.
 
-1. Install dependencies:
-   ```bash
-   npm install
-   ```
-2. Run unit tests (uses jsdom, no browser needed):
-   ```bash
-   npm test
-   ```
-3. Run E2E tests (launches headless Chromium via Puppeteer to test extension UI):
-   ```bash
-   npm run test:e2e
-   ```
+`npm run visual:qa` is an offline visual smoke check. It loads only the unpacked
+extension, seeds synthetic extension storage, fails on console errors, and writes
+popup, dashboard, and Options screenshots under ignored `artifacts/visual-qa/`. The
+dashboard/Options captures include both a synthetic previous-target warning state and
+its resolved state. The command does not open Amazon pages or scrape live data.
 
-### Architecture Overview
+Architecture in brief:
 
-- **Service Worker (`src/background/`)**: Manages alarms and orchestrates scraping jobs. Persists data to `chrome.storage`.
-- **Offscreen Document (`src/background/offscreen.html`)**: Used solely for its `DOMParser` capability to parse Amazon HTML safely in the background.
-- **Content Scripts (`src/content/`)**: Injected into Amazon pages to detect products/wishlists and inject the native "Track Price" button.
-- **Popup & Dashboard (`src/popup/`, `src/dashboard/`)**: The user interfaces for managing tracked items.
+- `src/background/`: alarms, scraping orchestration, notifications, and offscreen parsing.
+- `src/content/`: Amazon-page detection and the in-page tracking action.
+- `src/popup/`, `src/dashboard/`, `src/options/`: user interfaces.
+- `src/utils/storage.js`: local/sync storage boundaries and safe update helpers.
+- `docs/feature_specs.md`: expected behavior for QA.
 
-## AI Agent Guidelines
-
-If you are an AI assistant (Claude, Gemini, Codex, etc.) working on this repository, please read the following files before making changes:
-- `AGENTS.md`
-- `GEMINI.md`
-- `CLAUDE.md`
-- `docs/lessons_learned.md`
+AI coding tools must start with [AGENTS.md](AGENTS.md). Model-specific files are only
+discovery pointers; repository rules and documentation authority live in `AGENTS.md`.
