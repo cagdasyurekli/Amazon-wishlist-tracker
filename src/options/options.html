@@ -55,9 +55,13 @@
         </div>
         <div class="actions">
           <button id="export-btn" class="primary-btn" type="button">Export Data (JSON)</button>
+          <button id="choose-restore-btn" class="secondary-btn" type="button">Choose Backup</button>
+          <input id="restore-file-input" class="visually-hidden" type="file" accept="application/json,.json">
+          <button id="restore-btn" class="danger-btn" type="button" hidden>Restore Backup</button>
           <button id="clear-history-btn" class="danger-btn" type="button">Clear Price History</button>
         </div>
-        <p class="settings-note">Exports contain product names, Amazon URLs, prices, and history. This version cannot restore an export. Clearing history removes charts for every item; price tracking continues.</p>
+        <p id="restore-summary" class="settings-note" role="status" aria-live="polite" hidden></p>
+        <p class="settings-note">Exports contain product names, Amazon URLs, prices, tracked wishlists, history, and preferences. Restoring a validated backup replaces those current values and resets unfinished checks; it never changes your Amazon account. Clearing history removes charts for every item; price tracking continues.</p>
       </section>
     </main>
   </div>

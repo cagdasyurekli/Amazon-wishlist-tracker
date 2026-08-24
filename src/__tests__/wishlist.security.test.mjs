@@ -95,7 +95,7 @@ async function loadHarness({ storedState = {}, cursor = 0, scrapeResult, tracked
   };
   const StorageArea = { LOCAL: 'local', SYNC: 'sync' };
   const storageModule = new vm.SyntheticModule(
-    ['getTrackedItems', 'saveTrackedItem', 'updateTrackedItems', 'updateTrackedItemsIf', 'updateTrackedItemsWithFinalizer', 'updatePriceHistory', 'getStorageData', 'setStorageData', 'setStorageItems', 'formatPrice', 'prunePriceHistory', 'StorageKeys', 'StorageArea'],
+    ['getTrackedItems', 'saveTrackedItem', 'updateTrackedItems', 'updateTrackedItemsIf', 'updateTrackedItemsWithFinalizer', 'replaceTrackingData', 'updatePriceHistory', 'getStorageData', 'setStorageData', 'setStorageItems', 'formatPrice', 'prunePriceHistory', 'StorageKeys', 'StorageArea'],
     function initialize() {
       this.setExport('getTrackedItems', async () => storage.get('trackedItems') || []);
       this.setExport('saveTrackedItem', async () => {});
@@ -125,6 +125,7 @@ async function loadHarness({ storedState = {}, cursor = 0, scrapeResult, tracked
       this.setExport('updatePriceHistory', async (updater) => {
         storage.set('priceHistory', updater(storage.get('priceHistory') || {}));
       });
+      this.setExport('replaceTrackingData', async () => {});
       this.setExport('getStorageData', async (key) => storage.has(key) ? storage.get(key) : null);
       this.setExport('setStorageData', async (key, value) => { storage.set(key, value); });
       this.setExport('setStorageItems', async (values) => {
@@ -140,12 +141,18 @@ async function loadHarness({ storedState = {}, cursor = 0, scrapeResult, tracked
 
   const legacyNoticeModule = new vm.SourceTextModule(legacyNoticeSource, { context });
   const partialPolicyModule = new vm.SourceTextModule(partialPolicySource, { context });
+  const backupModule = new vm.SyntheticModule(
+    ['validateBackupPayload'],
+    function initialize() { this.setExport('validateBackupPayload', (backup) => backup); },
+    { context }
+  );
 
   const module = new vm.SourceTextModule(source, { context });
   await module.link((specifier) => {
     if (specifier === './scraper.js') return scraperModule;
     if (specifier === '../utils/storage.js') return storageModule;
     if (specifier === '../utils/amazon.js') return amazonModule;
+    if (specifier === '../utils/backup.js') return backupModule;
     if (specifier === './legacy_target_notice.js') return legacyNoticeModule;
     if (specifier === './wishlist_partial_policy.js') return partialPolicyModule;
     throw new Error(`Unexpected import: ${specifier}`);

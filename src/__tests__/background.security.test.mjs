@@ -15,6 +15,7 @@ async function loadBackground(initialItems = [], options = {}) {
   const savedItems = [];
   const notifications = [];
   const badgeTexts = [];
+  const restoredBackups = [];
 
   const context = vm.createContext({
     URL,
@@ -102,7 +103,7 @@ async function loadBackground(initialItems = [], options = {}) {
   const storageModule = new vm.SyntheticModule(
     [
       'getTrackedItems', 'saveTrackedItem', 'updateTrackedItems', 'updateTrackedItemsIf', 'updateTrackedItemsWithFinalizer', 'updatePriceHistory', 'getStorageData',
-      'setStorageData', 'setStorageItems', 'formatPrice', 'prunePriceHistory', 'StorageKeys', 'StorageArea'
+      'replaceTrackingData', 'setStorageData', 'setStorageItems', 'formatPrice', 'prunePriceHistory', 'StorageKeys', 'StorageArea'
     ],
     function initialize() {
       this.setExport('getTrackedItems', async () => trackedItems);
@@ -134,6 +135,11 @@ async function loadBackground(initialItems = [], options = {}) {
         }
       });
       this.setExport('updatePriceHistory', async (updater) => { updater({}); });
+      this.setExport('replaceTrackingData', async (backup) => {
+        restoredBackups.push(backup);
+        trackedItems = backup.items.map((entry) => ({ ...entry }));
+        currentSettings = { ...backup.settings };
+      });
       this.setExport('getStorageData', async (key, area) => {
         if (key === StorageKeys.SETTINGS && area === StorageArea.SYNC) {
           if (options.failSettingsReadAfterWrite && settingsWriteCompleted) {
@@ -161,12 +167,23 @@ async function loadBackground(initialItems = [], options = {}) {
 
   const legacyNoticeModule = new vm.SourceTextModule(legacyNoticeSource, { context });
   const partialPolicyModule = new vm.SourceTextModule(partialPolicySource, { context });
+  const backupModule = new vm.SyntheticModule(
+    ['validateBackupPayload'],
+    function initialize() {
+      this.setExport('validateBackupPayload', (backup) => {
+        if (!backup || !Array.isArray(backup.items)) throw new Error('Invalid synthetic backup');
+        return backup;
+      });
+    },
+    { context }
+  );
 
   const module = new vm.SourceTextModule(backgroundSource, { context });
   await module.link((specifier) => {
     if (specifier === './scraper.js') return scraperModule;
     if (specifier === '../utils/storage.js') return storageModule;
     if (specifier === '../utils/amazon.js') return amazonModule;
+    if (specifier === '../utils/backup.js') return backupModule;
     if (specifier === './legacy_target_notice.js') return legacyNoticeModule;
     if (specifier === './wishlist_partial_policy.js') return partialPolicyModule;
     throw new Error(`Unexpected import: ${specifier}`);
@@ -184,6 +201,7 @@ async function loadBackground(initialItems = [], options = {}) {
     savedItems,
     notifications,
     badgeTexts,
+    restoredBackups,
     getTrackedItems: () => trackedItems,
     getSettings: () => currentSettings
   };
@@ -298,6 +316,63 @@ describe('ADD_TRACKED_ITEM privilege boundary', () => {
     const capResponse = await capHarness.sendMessage({ type: 'ADD_TRACKED_ITEM', item: item() }, sender());
     assert.match(capResponse.error, /5000/);
     assert.equal(capHarness.savedItems.length, 0);
+  });
+});
+
+describe('backup restore privilege boundary', () => {
+  it('accepts restore only from the top-level Options page', async () => {
+    const harness = await loadBackground([item()]);
+    const backup = {
+      items: [item('B000000002')],
+      history: {},
+      trackedWishlists: [],
+      settings: { defaultDiscount: 20 },
+      summary: { itemCount: 1, historyPointCount: 0, wishlistCount: 0 }
+    };
+
+    const unauthorized = await harness.sendMessage({ type: 'RESTORE_BACKUP', backup }, dashboardSender());
+    assert.match(unauthorized.error, /Unauthorized/i);
+    assert.equal(harness.restoredBackups.length, 0);
+
+    const nestedFrame = await harness.sendMessage(
+      { type: 'RESTORE_BACKUP', backup },
+      optionsSender({ frameId: 2 })
+    );
+    assert.match(nestedFrame.error, /Unauthorized/i);
+    assert.equal(harness.restoredBackups.length, 0);
+
+    const restored = await harness.sendMessage({ type: 'RESTORE_BACKUP', backup }, optionsSender());
+    assert.equal(restored.success, true);
+    assert.deepEqual(restored.summary, backup.summary);
+    assert.equal(harness.restoredBackups.length, 1);
+    assert.equal(harness.getTrackedItems()[0].id, 'B000000002');
+  });
+
+  it('waits for the scrape queue before committing a replacement', async () => {
+    const harness = await loadBackground([item()]);
+    let releaseScrape;
+    const heldScrape = harness.api.enqueueScrapeJob(() => new Promise((resolve) => {
+      releaseScrape = resolve;
+    }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const backup = {
+      items: [item('B000000002')],
+      history: {},
+      trackedWishlists: [],
+      settings: {},
+      summary: { itemCount: 1, historyPointCount: 0, wishlistCount: 0 }
+    };
+
+    const restoreResponse = harness.sendMessage({ type: 'RESTORE_BACKUP', backup }, optionsSender());
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(harness.restoredBackups.length, 0);
+    assert.equal(harness.getTrackedItems()[0].id, 'B000000001');
+
+    releaseScrape();
+    await heldScrape;
+    const response = await restoreResponse;
+    assert.equal(response.success, true);
+    assert.equal(harness.getTrackedItems()[0].id, 'B000000002');
   });
 });
 

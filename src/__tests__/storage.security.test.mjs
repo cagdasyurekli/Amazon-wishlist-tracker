@@ -5,7 +5,7 @@ import { readFile } from 'node:fs/promises';
 
 const storageSource = await readFile(new URL('../utils/storage.js', import.meta.url), 'utf8');
 
-async function loadStorage({ local = {}, sync = {}, failLocalSet = false, corruptReadback = false } = {}) {
+async function loadStorage({ local = {}, sync = {}, failLocalSet = false, failSyncSet = false, corruptReadback = false } = {}) {
   const areas = {
     local: new Map(Object.entries(local)),
     sync: new Map(Object.entries(sync))
@@ -14,22 +14,28 @@ async function loadStorage({ local = {}, sync = {}, failLocalSet = false, corrup
   let localSetAttempted = false;
   const makeArea = (name) => ({
     async get(keys) {
-      const key = Array.isArray(keys) ? keys[0] : keys;
-      calls.push(`${name}:get:${key}`);
+      const requestedKeys = Array.isArray(keys) ? keys : [keys];
+      calls.push(`${name}:get:${requestedKeys.join(',')}`);
       if (name === 'local' && corruptReadback && localSetAttempted) {
-        return { [key]: [{ id: 'CORRUPTED' }] };
+        return { [requestedKeys[0]]: [{ id: 'CORRUPTED' }] };
       }
-      return areas[name].has(key) ? { [key]: areas[name].get(key) } : {};
+      return Object.fromEntries(
+        requestedKeys
+          .filter((key) => areas[name].has(key))
+          .map((key) => [key, areas[name].get(key)])
+      );
     },
     async set(values) {
       calls.push(`${name}:set:${Object.keys(values).join(',')}`);
       if (name === 'local') localSetAttempted = true;
       if (name === 'local' && failLocalSet) throw new Error('local write failed');
+      if (name === 'sync' && failSyncSet) throw new Error('sync write failed');
       Object.entries(values).forEach(([key, value]) => areas[name].set(key, value));
     },
-    async remove(key) {
-      calls.push(`${name}:remove:${key}`);
-      areas[name].delete(key);
+    async remove(keys) {
+      const requestedKeys = Array.isArray(keys) ? keys : [keys];
+      calls.push(`${name}:remove:${requestedKeys.join(',')}`);
+      requestedKeys.forEach((key) => areas[name].delete(key));
     }
   });
 
@@ -103,6 +109,82 @@ describe('legacy trackedItems privacy migration', () => {
     assert.equal(areas.local.has('trackedItems'), false);
     assert.equal(areas.sync.has('trackedItems'), false);
     assert.equal(calls.some((call) => call.includes(':set:') || call.includes(':remove:')), false);
+  });
+});
+
+describe('validated backup replacement', () => {
+  it('replaces user data in one local batch and resets transient scheduler state', async () => {
+    const { api, areas, calls } = await loadStorage({
+      local: {
+        trackedItems: [{ id: 'B000000001' }],
+        lastScrapeTime: 123,
+        wishlistScrapeState: { stale: true },
+        captchaBackoffUntil: 999999,
+        captchaBackoffAttempts: 3
+      },
+      sync: { settings: { defaultDiscount: 10 } }
+    });
+    const replacement = {
+      items: [{ id: 'B000000002', title: 'Restored' }],
+      history: { B000000002: [{ price: 8, timestamp: 456 }] },
+      trackedWishlists: [{ id: 'LIST-A', url: 'https://www.amazon.com/hz/wishlist/ls/LIST-A', autoSync: true }],
+      settings: { defaultDiscount: 20, historyRetentionDays: '90' }
+    };
+
+    await api.replaceTrackingData(replacement);
+
+    assert.deepEqual(areas.local.get('trackedItems'), replacement.items);
+    assert.deepEqual(areas.local.get('priceHistory'), replacement.history);
+    assert.deepEqual(areas.local.get('trackedWishlists'), replacement.trackedWishlists);
+    assert.equal(areas.local.get('lastScrapeTime'), null);
+    assert.equal(areas.local.get('scrapeCursor'), 0);
+    assert.deepEqual(Object.keys(areas.local.get('wishlistScrapeState')), []);
+    assert.equal(areas.local.get('captchaBackoffUntil'), 999999);
+    assert.equal(areas.local.get('captchaBackoffAttempts'), 3);
+    assert.deepEqual(areas.sync.get('settings'), replacement.settings);
+    assert.equal(calls.filter((call) => call.startsWith('local:set:')).length, 1);
+  });
+
+  it('restores the exact local snapshot if Sync settings cannot be written and leaves the mutex usable', async () => {
+    const originalLocal = {
+      trackedItems: [{ id: 'B000000001', title: 'Keep me' }],
+      priceHistory: { B000000001: [{ price: 10, timestamp: 123 }] },
+      scrapeCursor: 7
+    };
+    const { api, areas } = await loadStorage({
+      local: originalLocal,
+      sync: { settings: { defaultDiscount: 10 } },
+      failSyncSet: true
+    });
+
+    await assert.rejects(api.replaceTrackingData({
+      items: [{ id: 'B000000002' }],
+      history: {},
+      trackedWishlists: [],
+      settings: { defaultDiscount: 20 }
+    }), /sync write failed/);
+
+    assert.deepEqual(Object.fromEntries(areas.local), originalLocal);
+    await api.updateTrackedItems((items) => items.map((item) => ({ ...item, isPriority: true })));
+    assert.equal(areas.local.get('trackedItems')[0].isPriority, true);
+  });
+
+  it('leaves the prior snapshot intact when the Local replacement batch fails', async () => {
+    const originalItems = [{ id: 'B000000001', title: 'Still here' }];
+    const { api, areas } = await loadStorage({
+      local: { trackedItems: originalItems, scrapeCursor: 4 },
+      failLocalSet: true
+    });
+
+    await assert.rejects(api.replaceTrackingData({
+      items: [{ id: 'B000000002' }],
+      history: {},
+      trackedWishlists: [],
+      settings: {}
+    }), /local write failed/);
+
+    assert.deepEqual(areas.local.get('trackedItems'), originalItems);
+    assert.equal(areas.local.get('scrapeCursor'), 4);
   });
 });
 

@@ -1,5 +1,7 @@
 # Amazon Wishlist Tracker
 
+[![CI](https://github.com/cagdasyurekli/Amazon-wishlist-tracker/actions/workflows/ci.yml/badge.svg)](https://github.com/cagdasyurekli/Amazon-wishlist-tracker/actions/workflows/ci.yml)
+
 A privacy-first Manifest V3 Chrome extension that tracks Amazon product and wishlist prices without an external application backend.
 
 ## What it does
@@ -9,6 +11,7 @@ A privacy-first Manifest V3 Chrome extension that tracks Amazon product and wish
 - Uses bounded adaptive price checks, a separate priority queue, and anti-bot backoff.
 - Shows timestamped price history, availability, targets, and Amazon wishlist price-drop metadata.
 - Sends local Chrome notifications for configured price, discount, and restock conditions.
+- Exports and restores a validated local JSON backup of tracking data and preferences.
 
 ## Privacy model
 
@@ -32,6 +35,7 @@ There is no production build step; Chrome executes the checked-in extension sour
 - On a public/shared wishlist, choose **Import This Wishlist**, or paste its URL into the dashboard.
 - Use the dashboard to search, filter, inspect history, set per-product target prices, prioritize checks, and manage tracked items.
 - Enable **Keep List in Sync** only when new and removed wishlist membership should be reconciled automatically. Items tracked independently or by another wishlist are preserved.
+- Use **Extension Settings** to export a backup or restore one after reviewing its item, history, and wishlist counts.
 
 ## Development and verification
 
@@ -61,7 +65,7 @@ npm run release:check
 - `src/content/`: Amazon page detection, visible wishlist extraction, and the in-page tracking action.
 - `src/popup/`: bounded quick-actions popup.
 - `src/dashboard/`: full list, wishlist, history, target, filter, and priority management.
-- `src/options/`: global preferences, local JSON export, and price-history deletion.
+- `src/options/`: global preferences, validated local JSON backup/restore, and price-history deletion.
 - `src/__tests__/`: parser, scheduler-contract, and real Chromium extension tests.
 
 ## Public project guidance
@@ -71,7 +75,9 @@ npm run release:check
 - Release history: [CHANGELOG.md](CHANGELOG.md)
 - Stable-candidate acceptance: [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md)
 - Contributions and local verification: [CONTRIBUTING.md](CONTRIBUTING.md)
-- Chrome Web Store preparation checklist: [CHROMEWEBSTORE.md](CHROMEWEBSTORE.md)
+- User support: [SUPPORT.md](SUPPORT.md)
+- Community conduct: [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
+- Chrome Web Store scope decision: [CHROMEWEBSTORE.md](CHROMEWEBSTORE.md)
 - Installation, usage, migration, and troubleshooting: [docs/USER_MANUAL.md](docs/USER_MANUAL.md)
 
 Amazon and the Amazon logo are trademarks of Amazon.com, Inc. or its affiliates. This independent project is not affiliated with or endorsed by Amazon.

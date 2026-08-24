@@ -91,18 +91,21 @@ This document defines the expected behavior of all features in the Amazon Wishli
   - A pending legacy currencyless target displays a persistent warning that links to Extension Settings and disappears when the setting is acknowledged.
 
 ### 3.3 Options Page (`options.html`)
-- **Purpose:** Global settings and data export.
+- **Purpose:** Global settings and local data backup/restore.
 - **Features:**
   - Configure the global `Default Discount Alert (%)`. Target prices are configured per product to avoid applying one numeric value across different currencies.
   - Configurable strict price-history retention (30 days, 90 days, 1 year, or forever). Expired points are deleted.
-  - Export all raw tracking data to JSON.
+  - Export a versioned JSON backup containing tracked products, price history, tracked wishlists, and supported preferences.
+  - Select and validate backups under a 32 MiB file limit, preview product/history/wishlist counts, and require an expiring second confirmation before replacement.
+  - Restore only canonical supported Amazon URLs and allowlisted record fields. The Options page validates first; the background worker independently validates again and accepts the mutation only from the top-level Options page.
+  - Queue restore behind in-flight scrape work, replace user-owned Local data under the tracked-item mutex, reset unfinished cursors while keeping imported products due for fresh checks, preserve active CAPTCHA/rate-limit backoff, and restore the exact prior Local snapshot if the Sync settings write fails.
   - Clear all price history.
-  - Explain that tracked items and price history stay on the device, lightweight preferences may use Chrome sync, exports contain product URLs/prices/history, and clearing history does not stop tracking.
+  - Explain that tracked items and price history stay on the device, lightweight preferences may use Chrome sync, backups contain shopping-interest data, restore replaces current local tracking data, and clearing history does not stop tracking.
   - Preserve an older currencyless global target until explicit acknowledgement. Offer a one-click copy only for a revalidated single-currency collection; otherwise direct the user to set per-product targets.
 
 ---
 
 ## 4. Privacy & Data Storage
-- **Local-Only:** All tracking data (`TRACKED_ITEMS`, `PRICE_HISTORY`) is saved strictly in `chrome.storage.local`.
+- **Local-Only:** All tracking data (`TRACKED_ITEMS`, `TRACKED_WISHLISTS`, `PRICE_HISTORY`) is saved strictly in `chrome.storage.local`.
 - **No Cloud:** There is no external backend, no analytics tracking, and no data leaves the user's browser except for direct requests to Amazon domains.
 - **Sync Storage:** Lightweight global preferences (dashboard sort/filter and default discount threshold) are stored in `chrome.storage.sync` to persist across the user's browser instances.

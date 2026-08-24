@@ -32,7 +32,7 @@ Important assets are the user's tracked products and wishlist URLs, price histor
 - User-controlled edits and removals, background price updates, and wishlist merges must not overwrite one another or resurrect deleted items.
 - Partial, failed, rate-limited, or interrupted wishlist pagination must never be treated as a complete list and must never trigger removal reconciliation.
 - Scraping remains bounded and serialized, respects persisted CAPTCHA/rate-limit backoff, and preserves resumable state across service-worker restarts.
-- Export is an explicit user action. Clearing price history must require an in-context confirmation and must not delete tracked products.
+- Export is an explicit user action. Restore accepts only a validated, bounded backup from the top-level Options page, requires an expiring two-step confirmation, queues behind scrape work, keeps products due for fresh checks, and must preserve active anti-bot backoff. Clearing price history must require an in-context confirmation and must not delete tracked products.
 - Manifest permissions, icon paths, version metadata, and packaged files must be validated before release.
 
 ## Reportable findings and severity context

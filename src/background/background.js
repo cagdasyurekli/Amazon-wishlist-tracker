@@ -1,6 +1,7 @@
 import { scrapeAmazonProduct, scrapeAmazonWishlist, closeOffscreenDocument } from './scraper.js';
-import { getTrackedItems, saveTrackedItem, updateTrackedItems, updateTrackedItemsWithFinalizer, updatePriceHistory, getStorageData, setStorageData, setStorageItems, formatPrice, prunePriceHistory, StorageKeys, StorageArea } from '../utils/storage.js';
+import { getTrackedItems, saveTrackedItem, updateTrackedItems, updateTrackedItemsWithFinalizer, replaceTrackingData, updatePriceHistory, getStorageData, setStorageData, setStorageItems, formatPrice, prunePriceHistory, StorageKeys, StorageArea } from '../utils/storage.js';
 import { normalizeStoredAmazonProductUrl, sanitizeAmazonImageUrl } from '../utils/amazon.js';
+import { validateBackupPayload } from '../utils/backup.js';
 import './legacy_target_notice.js';
 import './wishlist_partial_policy.js';
 
@@ -328,7 +329,7 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
 // Adaptive, priority, and wishlist alarms can coincide. Chain all network jobs
 // through one queue so they share request pressure and storage ownership.
 let scrapeJobQueue = Promise.resolve();
-function enqueueScrapeJob(job) {
+export function enqueueScrapeJob(job) {
   const run = scrapeJobQueue.then(job);
   scrapeJobQueue = run.catch(() => {});
   return run;
@@ -483,6 +484,32 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse({ success: true });
       } catch (err) {
         sendResponse({ error: err.message || 'Failed to acknowledge legacy target.' });
+      }
+    })();
+    return true;
+  }
+
+  if (message.type === 'RESTORE_BACKUP') {
+    (async () => {
+      try {
+        if (!isAuthorizedOptionsSender(sender)) {
+          sendResponse({ error: 'Unauthorized backup restore.' });
+          return;
+        }
+        const validated = validateBackupPayload(message.backup);
+        // Restore is a replacement boundary. Queue it behind any in-flight
+        // network job so a stale scrape cannot commit after the replacement.
+        await enqueueScrapeJob(() => replaceTrackingData(validated));
+        try {
+          await chrome.alarms.clear(WISHLIST_CONTINUE_ALARM);
+          await scheduleStandardPriceCheck();
+          await updateBadgeCount();
+        } catch (maintenanceError) {
+          console.warn('Backup restored, but follow-up scheduling will retry later:', maintenanceError);
+        }
+        sendResponse({ success: true, summary: validated.summary });
+      } catch (err) {
+        sendResponse({ error: err.message || 'Failed to restore backup.' });
       }
     })();
     return true;

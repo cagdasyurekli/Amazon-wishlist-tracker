@@ -241,11 +241,28 @@ immediately.
 ### Export Data (JSON)
 
 Select **Export Data (JSON)** to download `saved_signal_backup.json`. It contains the
-tracked product records, price history, and export time. Treat the file as private: it
-can contain product titles, URLs, targets, and shopping-interest history.
+tracked product records, price history, tracked wishlists, supported preferences, and
+export time. Treat the file as private: it can contain product titles, URLs, targets,
+and shopping-interest history.
 
-The current extension has no JSON import/restore command. Export is useful for review
-and safekeeping, but it is not an in-product restore guarantee.
+### Restore a backup
+
+1. Select **Choose Backup** and choose a `saved_signal_backup.json` file no larger than
+   32 MB.
+2. Review the displayed product, history-point, and wishlist counts.
+3. Select **Restore Backup**.
+4. While the button says **Confirm Replace Local Data**, select it again.
+
+The second confirmation expires after a few seconds. Restore replaces current tracked
+products, history, tracked wishlists, and supported preferences, and resets unfinished
+check cursors so new checks start from a consistent state. The file is validated both
+before confirmation and again by the background worker. Unsupported hosts, mismatched
+product identities, malformed values, excessive collections, and unknown fields are
+not imported. Restore never changes an Amazon account or wishlist.
+
+There is no in-product undo after a successful restore. Export the current data first
+if you may need it later. A rejected or failed restore leaves the previous local data
+in place.
 
 ### Clear Price History
 
@@ -286,8 +303,8 @@ a bug report, exported example, or AI prompt.
 
 ### Update or reload a local copy
 
-1. You may export data for review or safekeeping before a major update. The current UI
-   cannot restore the JSON, so it is not a recovery backup.
+1. Export a backup before a major update when you want a recoverable copy of tracked
+   products, history, wishlists, and supported preferences.
 2. Replace or update the repository files without moving `manifest.json` away from the
    selected root folder.
 3. Open `chrome://extensions/`.
@@ -305,13 +322,13 @@ as another unpacked extension installation.
 
 ### Uninstall
 
-1. Export any data you want to retain for review or safekeeping; it cannot be restored
-   by this version.
+1. Export any data you want to retain, and keep the JSON file private.
 2. Open `chrome://extensions/`.
 3. Select **Remove** for Amazon Wishlist Tracker and confirm.
 
-Removing an extension can remove its Chrome storage. The exported JSON remains on disk,
-but this version has no built-in restore command.
+Removing an extension can remove its Chrome storage. The exported JSON remains on disk
+and can be restored after reinstalling this version, provided the file is still valid
+and no larger than the documented safety limit.
 
 ## 13. Troubleshooting
 

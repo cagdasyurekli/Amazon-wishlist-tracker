@@ -24,11 +24,13 @@ To perform its single purpose, the extension makes direct requests from the user
 
 The content script reads product and wishlist information already displayed on supported Amazon pages. Background requests do not intentionally attach Amazon session credentials.
 
-## Notifications and exports
+## Notifications and backups
 
 Chrome notifications are generated locally when a configured price, discount, or restock condition is met.
 
-**Export Data (JSON)** creates an unencrypted local download containing tracked items and price history. The user controls that file after download and should protect or delete it as appropriate.
+**Export Data (JSON)** creates an unencrypted local download containing tracked items, price history, tracked wishlists, supported preferences, and export metadata. The user controls that file after download and should protect or delete it as appropriate.
+
+**Restore Backup** reads a user-selected JSON file locally in the extension. The file is not uploaded to the developer or another service. After validation and an explicit two-step confirmation, restore replaces the corresponding Chrome extension data and preferences. Active Amazon CAPTCHA/rate-limit backoff is operational safety state and is preserved rather than imported or cleared.
 
 ## Retention and deletion
 
@@ -45,6 +47,6 @@ The selected history-retention setting removes expired price-history points duri
 
 ## Changes
 
-Material changes to data collection, destinations, permissions, or retention must update this policy and the Chrome Web Store disclosure before release.
+Material changes to data collection, destinations, permissions, retention, or backup behavior must update this policy before release. Chrome Web Store distribution is not part of the current product scope.
 
 Amazon and the Amazon logo are trademarks of Amazon.com, Inc. or its affiliates. This independent project is not affiliated with or endorsed by Amazon.

@@ -259,3 +259,9 @@ Current coverage: CAPTCHA (title + body), standard parse, US & EU thousands sepa
 - A complete remote snapshot is still stale by persistence time. Destructive wishlist reconciliation must re-evaluate current user-owned fields inside the serialized storage update; automatic remote reconciliation should not delete retained price history.
 - Wishlist-shaped rows prove parseability, not list identity. Only matching list identifiers or strong document-level canonical identity may authorize complete-state reconciliation.
 - A serialized tracked-item merge does not protect a separately stored history snapshot. Background checks now persist only the samples they appended through the shared storage mutex, so a delayed scrape cannot replace a newer manual-sync sample with an older whole-object snapshot.
+
+# 2026-08-24: backup restore is a privileged replacement transaction
+
+- Treat every backup file as untrusted even when it was created by this extension. Enforce file/count/value bounds, canonical Amazon identity checks, and explicit field allowlists before any storage write.
+- Options-page validation improves feedback but is not an authorization boundary. Revalidate in the background worker and accept restore messages only from the exact top-level Options page.
+- A restore spans Local user data and Sync preferences, so queue it behind in-flight scrape work, serialize it with tracked-item writes, batch the Local replacement, drop imported scheduler deadlines, preserve active anti-bot backoff, and roll back the exact prior Local snapshot when the Sync write fails. Follow-up alarm or badge maintenance must not turn a committed restore into a misleading failure response.

@@ -1,13 +1,13 @@
 {
   "name": "amazon-wishlist-tracker",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "private": true,
   "description": "Privacy-first Manifest V3 extension for tracking Amazon product and wishlist prices locally.",
   "scripts": {
-    "test": "jest --testPathIgnorePatterns=extension.e2e.test.js scraper.contract.test.mjs network.security.mjs background.security.test.mjs storage.security.test.mjs wishlist.security.test.mjs content.security.e2e.mjs",
-    "test:unit": "jest --testPathIgnorePatterns=extension.e2e.test.js scraper.contract.test.mjs network.security.mjs background.security.test.mjs storage.security.test.mjs wishlist.security.test.mjs content.security.e2e.mjs",
+    "test": "jest --testPathIgnorePatterns=extension.e2e.test.js scraper.contract.test.mjs network.security.mjs backup.security.test.mjs background.security.test.mjs storage.security.test.mjs wishlist.security.test.mjs content.security.e2e.mjs",
+    "test:unit": "jest --testPathIgnorePatterns=extension.e2e.test.js scraper.contract.test.mjs network.security.mjs backup.security.test.mjs background.security.test.mjs storage.security.test.mjs wishlist.security.test.mjs content.security.e2e.mjs",
     "test:scraper-contract": "node --test src/__tests__/scraper.contract.test.mjs",
-    "test:security": "node --test src/__tests__/network.security.mjs && NODE_OPTIONS=--experimental-vm-modules node --test src/__tests__/background.security.test.mjs src/__tests__/storage.security.test.mjs src/__tests__/wishlist.security.test.mjs && node --test src/__tests__/content.security.e2e.mjs",
+    "test:security": "node --test src/__tests__/network.security.mjs src/__tests__/backup.security.test.mjs && NODE_OPTIONS=--experimental-vm-modules node --test src/__tests__/background.security.test.mjs src/__tests__/storage.security.test.mjs src/__tests__/wishlist.security.test.mjs && node --test src/__tests__/content.security.e2e.mjs",
     "test:e2e": "NODE_OPTIONS=--experimental-vm-modules jest src/__tests__/extension.e2e.test.js --runInBand",
     "visual:qa": "node scripts/visual-qa.js",
     "validate:release": "node scripts/validate-release.mjs",

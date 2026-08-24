@@ -2,6 +2,21 @@
 
 All notable changes to this project are documented here. Versions follow semantic versioning.
 
+## [Unreleased]
+
+## [1.2.0] - 2026-08-24
+
+### Added
+
+- Versioned JSON backups now include tracked products, price history, tracked wishlists, and supported preferences.
+- Extension Settings can validate, preview, and restore a backup after an expiring two-step replacement confirmation.
+- Public-repository CI, dependency update automation, issue forms, pull-request guidance, support information, and community standards.
+
+### Security
+
+- Backup files are treated as untrusted input at both the Options page and background-worker boundaries, with strict count, URL, identity, price, timestamp, and settings allowlists.
+- Restore writes run under the tracked-item mutex, reset transient scrape state, and restore the previous Local snapshot if the Chrome Sync preference write fails.
+
 ## [1.1.0] - 2026-08-24
 
 ### Added

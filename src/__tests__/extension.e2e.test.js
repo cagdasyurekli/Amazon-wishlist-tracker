@@ -525,7 +525,12 @@ describe('Chrome extension E2E', () => {
     await page.evaluate(async () => {
       await chrome.storage.local.set({
         trackedItems: [{ id: 'B000000001', title: 'Export me', currentPrice: 12.5, currency: '€' }],
-        priceHistory: { B000000001: [{ price: 12.5, timestamp: 123 }] }
+        priceHistory: { B000000001: [{ price: 12.5, timestamp: 123 }] },
+        trackedWishlists: [{
+          id: 'LIST-A',
+          url: 'https://www.amazon.com/hz/wishlist/ls/LIST-A',
+          autoSync: true
+        }]
       });
       window.__savedSignalDownload = null;
       HTMLAnchorElement.prototype.click = function captureDownload() {
@@ -562,8 +567,143 @@ describe('Chrome extension E2E', () => {
       expect.objectContaining({ id: 'B000000001', title: 'Export me', currentPrice: 12.5 })
     ]);
     expect(exported.payload.history.B000000001).toEqual([{ price: 12.5, timestamp: 123 }]);
+    expect(exported.payload.format).toBe('saved-signal-backup');
+    expect(exported.payload.version).toBe(1);
+    expect(exported.payload.trackedWishlists).toEqual([
+      expect.objectContaining({ id: 'LIST-A', autoSync: true })
+    ]);
+    expect(exported.payload.settings).toEqual(expect.objectContaining({
+      defaultDiscount: 20,
+      historyRetentionDays: '90'
+    }));
     expect(Number.isNaN(Date.parse(exported.payload.exportedAt))).toBe(false);
   }, 30000);
+
+  it('validates a backup before an expiring confirmation replaces local tracking data', async () => {
+    await launchExtension();
+
+    temporaryProfiles = temporaryProfiles || [];
+    const malformedPath = path.join(os.tmpdir(), `saved-signal-malformed-${Date.now()}.json`);
+    const invalidPath = path.join(os.tmpdir(), `saved-signal-invalid-${Date.now()}.json`);
+    const backupPath = path.join(os.tmpdir(), `saved-signal-valid-${Date.now()}.json`);
+    temporaryProfiles.push(malformedPath, invalidPath, backupPath);
+    fs.writeFileSync(malformedPath, '{"items": [');
+    fs.writeFileSync(invalidPath, JSON.stringify({
+      items: [{
+        id: 'BRESTORE01',
+        title: 'Unsafe product',
+        url: 'https://amazon.com.evil.test/dp/BRESTORE01'
+      }],
+      history: {}
+    }));
+    fs.writeFileSync(backupPath, JSON.stringify({
+      format: 'saved-signal-backup',
+      version: 1,
+      items: [{
+        id: 'BRESTORE01',
+        title: 'Restored product',
+        url: 'https://www.amazon.com/dp/BRESTORE01?ref_=backup',
+        currentPrice: 8.5,
+        originalPrice: 10,
+        currency: '$',
+        inStock: true,
+        targetPrice: 8,
+        trackedIndividually: true,
+        isPurchased: true
+      }],
+      history: { BRESTORE01: [{ price: 8.5, timestamp: 456 }] },
+      trackedWishlists: [{
+        id: 'LIST-R',
+        url: 'https://www.amazon.com/hz/wishlist/ls/LIST-R?ref_=backup',
+        autoSync: true
+      }],
+      settings: { defaultDiscount: 25, historyRetentionDays: '365', defaultTargetPrice: 1 }
+    }));
+
+    const page = await browser.newPage();
+    await page.goto(`chrome-extension://${extensionId}/src/options/options.html`, {
+      waitUntil: 'domcontentloaded'
+    });
+    await page.evaluate(async () => {
+      await chrome.storage.local.set({
+        trackedItems: [{ id: 'B000000001', title: 'Keep until confirmation' }],
+        priceHistory: { B000000001: [{ price: 20, timestamp: 123 }] },
+        scrapeCursor: 9
+      });
+      await chrome.storage.sync.set({ settings: { defaultDiscount: 10 } });
+    });
+
+    await (await page.$('#restore-file-input')).uploadFile(malformedPath);
+    await page.waitForFunction(() => document.querySelector('#settings-status')?.textContent.includes('Unexpected'));
+    await expect(page.$eval('#restore-btn', (node) => node.hidden)).resolves.toBe(true);
+
+    await (await page.$('#restore-file-input')).uploadFile(invalidPath);
+    await page.waitForFunction(() => document.querySelector('#settings-status')?.textContent.includes('Invalid product URL'));
+    await expect(page.$eval('#restore-btn', (node) => node.hidden)).resolves.toBe(true);
+    await expect(page.evaluate(async () => (await chrome.storage.local.get('trackedItems')).trackedItems[0].id))
+      .resolves.toBe('B000000001');
+
+    await (await page.$('#restore-file-input')).uploadFile(backupPath);
+    await page.waitForSelector('#restore-btn:not([hidden])');
+    await expect(page.$eval('#restore-summary', (node) => node.textContent)).resolves.toContain('1 product, 1 history point, and 1 wishlist');
+
+    // Re-selecting an invalid file clears both the validated candidate and any
+    // armed confirmation from the previous selection.
+    await (await page.$('#restore-file-input')).uploadFile(invalidPath);
+    await page.waitForFunction(() => document.querySelector('#settings-status')?.textContent.includes('Invalid product URL'));
+    await expect(page.$eval('#restore-btn', (node) => node.hidden)).resolves.toBe(true);
+    await (await page.$('#restore-file-input')).uploadFile(backupPath);
+    await page.waitForSelector('#restore-btn:not([hidden])');
+
+    await page.click('#restore-btn');
+    await expect(page.$eval('#restore-btn', (node) => node.textContent)).resolves.toBe('Confirm Replace Local Data');
+    await expect(page.evaluate(async () => (await chrome.storage.local.get('trackedItems')).trackedItems[0].id))
+      .resolves.toBe('B000000001');
+
+    await new Promise((resolve) => setTimeout(resolve, 4100));
+    await expect(page.$eval('#restore-btn', (node) => node.textContent)).resolves.toBe('Restore Backup');
+    await expect(page.evaluate(async () => (await chrome.storage.local.get('trackedItems')).trackedItems[0].id))
+      .resolves.toBe('B000000001');
+
+    await page.focus('#restore-btn');
+    await page.keyboard.press('Enter');
+    await expect(page.$eval('#restore-btn', (node) => node.textContent)).resolves.toBe('Confirm Replace Local Data');
+    await page.keyboard.press('Enter');
+    await expect(page.$eval('#restore-btn', (node) => node.disabled)).resolves.toBe(true);
+    await page.waitForFunction(async () => {
+      const status = document.querySelector('#settings-status');
+      const { trackedItems } = await chrome.storage.local.get('trackedItems');
+      return trackedItems?.[0]?.id === 'BRESTORE01' ||
+        status?.textContent.includes('Backup restored') ||
+        status?.classList.contains('error');
+    }, { timeout: 10000 });
+    const restoreStatus = await page.$eval('#settings-status', (node) => node.textContent);
+    expect(restoreStatus).toContain('Backup restored');
+    await page.waitForFunction(async () => {
+      const [{ trackedItems, priceHistory, trackedWishlists, scrapeCursor }, { settings }] = await Promise.all([
+        chrome.storage.local.get(['trackedItems', 'priceHistory', 'trackedWishlists', 'scrapeCursor']),
+        chrome.storage.sync.get('settings')
+      ]);
+      return trackedItems?.[0]?.id === 'BRESTORE01' &&
+        priceHistory?.BRESTORE01?.[0]?.price === 8.5 &&
+        trackedWishlists?.[0]?.id === 'LIST-R' &&
+        scrapeCursor === 0 &&
+        settings?.defaultDiscount === 25 &&
+        settings?.historyRetentionDays === '365';
+    });
+    const restored = await page.evaluate(async () => {
+      const [{ trackedItems, trackedWishlists }, { settings }] = await Promise.all([
+        chrome.storage.local.get(['trackedItems', 'trackedWishlists']),
+        chrome.storage.sync.get('settings')
+      ]);
+      return { item: trackedItems[0], wishlist: trackedWishlists[0], settings };
+    });
+    expect(restored.item.url).toBe('https://www.amazon.com/dp/BRESTORE01');
+    expect(restored.item.isPurchased).toBeUndefined();
+    expect(restored.wishlist.url).toBe('https://www.amazon.com/hz/wishlist/ls/LIST-R');
+    expect(restored.settings.defaultTargetPrice).toBeUndefined();
+    await expect(page.$eval('#settings-status', (node) => node.textContent)).resolves.toContain('Backup restored');
+  }, 60000);
 
   it('requires an expiring keyboard confirmation before clearing history and preserves tracked items', async () => {
     await launchExtension();

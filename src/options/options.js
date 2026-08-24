@@ -1,9 +1,14 @@
 import { getStorageData, setStorageData, getTrackedItems, StorageKeys, StorageArea } from '../utils/storage.js';
+import { createBackupPayload, validateBackupPayload, MAX_BACKUP_BYTES } from '../utils/backup.js';
 
 document.addEventListener('DOMContentLoaded', async () => {
   const discountInput = document.getElementById('default-discount');
   const exportBtn = document.getElementById('export-btn');
   const clearHistoryBtn = document.getElementById('clear-history-btn');
+  const chooseRestoreBtn = document.getElementById('choose-restore-btn');
+  const restoreFileInput = document.getElementById('restore-file-input');
+  const restoreBtn = document.getElementById('restore-btn');
+  const restoreSummary = document.getElementById('restore-summary');
   const settingsStatus = document.getElementById('settings-status');
   const legacyTargetMigration = document.getElementById('legacy-target-migration');
   const legacyTargetMessage = document.getElementById('legacy-target-message');
@@ -13,6 +18,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   const retentionSelect = document.getElementById('history-retention');
   let statusTimer = null;
   let settings = {};
+  let restoreCandidate = null;
+  let restoreConfirmationTimer = null;
 
   function sendBackgroundMessage(message) {
     return new Promise((resolve) => {
@@ -55,6 +62,27 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   function hideLegacyTargetMigration() {
     if (legacyTargetMigration) legacyTargetMigration.hidden = true;
+  }
+
+  function resetRestoreSelection() {
+    restoreCandidate = null;
+    restoreFileInput.value = '';
+    restoreBtn.hidden = true;
+    restoreBtn.disabled = false;
+    restoreBtn.classList.remove('confirming');
+    restoreBtn.textContent = 'Restore Backup';
+    restoreSummary.hidden = true;
+    restoreSummary.textContent = '';
+    clearTimeout(restoreConfirmationTimer);
+  }
+
+  function renderRestoredSettings(nextSettings) {
+    settings = nextSettings;
+    discountInput.value = Number.isInteger(settings.defaultDiscount)
+      ? String(settings.defaultDiscount)
+      : '';
+    retentionSelect.value = settings.historyRetentionDays || '30';
+    hideLegacyTargetMigration();
   }
 
   async function renderLegacyTargetMigration() {
@@ -181,8 +209,17 @@ document.addEventListener('DOMContentLoaded', async () => {
     exportBtn.disabled = true;
     try {
       const items = await getTrackedItems();
-      const history = await getStorageData(StorageKeys.PRICE_HISTORY, StorageArea.LOCAL);
-      const exportObj = { items, history, exportedAt: new Date().toISOString() };
+      const [history, trackedWishlists, latestSettings] = await Promise.all([
+        getStorageData(StorageKeys.PRICE_HISTORY, StorageArea.LOCAL),
+        getStorageData(StorageKeys.TRACKED_WISHLISTS, StorageArea.LOCAL),
+        getStorageData(StorageKeys.SETTINGS, StorageArea.SYNC)
+      ]);
+      const exportObj = createBackupPayload({
+        items,
+        history: history || {},
+        trackedWishlists: trackedWishlists || [],
+        settings: latestSettings || {}
+      });
       const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(exportObj, null, 2));
       const downloadAnchor = document.createElement('a');
       downloadAnchor.setAttribute('href', dataStr);
@@ -195,6 +232,65 @@ document.addEventListener('DOMContentLoaded', async () => {
       showStatus('Could not export your data. Try again.', 'error');
     } finally {
       exportBtn.disabled = false;
+    }
+  });
+
+  chooseRestoreBtn.addEventListener('click', () => restoreFileInput.click());
+
+  restoreFileInput.addEventListener('change', async () => {
+    const [file] = restoreFileInput.files || [];
+    resetRestoreSelection();
+    if (!file) return;
+    if (file.size > MAX_BACKUP_BYTES) {
+      showStatus('Backup is larger than the 32 MB safety limit.', 'error');
+      return;
+    }
+
+    try {
+      const parsed = JSON.parse(await file.text());
+      restoreCandidate = validateBackupPayload(parsed);
+      const { itemCount, historyPointCount, wishlistCount } = restoreCandidate.summary;
+      restoreSummary.textContent = `Ready to restore ${itemCount} product${itemCount === 1 ? '' : 's'}, ${historyPointCount} history point${historyPointCount === 1 ? '' : 's'}, and ${wishlistCount} wishlist${wishlistCount === 1 ? '' : 's'}. Current local tracking data will be replaced.`;
+      restoreSummary.hidden = false;
+      restoreBtn.hidden = false;
+      restoreBtn.focus();
+      showStatus('Backup validated. Review the summary before restoring.');
+    } catch (error) {
+      restoreCandidate = null;
+      showStatus(error.message || 'Could not validate this backup.', 'error');
+    }
+  });
+
+  restoreBtn.addEventListener('click', async () => {
+    if (!restoreCandidate) return;
+    if (!restoreBtn.classList.contains('confirming')) {
+      restoreBtn.classList.add('confirming');
+      restoreBtn.textContent = 'Confirm Replace Local Data';
+      clearTimeout(restoreConfirmationTimer);
+      restoreConfirmationTimer = setTimeout(() => {
+        restoreBtn.classList.remove('confirming');
+        restoreBtn.textContent = 'Restore Backup';
+      }, 4000);
+      return;
+    }
+
+    clearTimeout(restoreConfirmationTimer);
+    restoreBtn.disabled = true;
+    try {
+      const response = await sendBackgroundMessage({
+        type: 'RESTORE_BACKUP',
+        backup: restoreCandidate
+      });
+      if (!response.success) throw new Error(response.error || 'Restore failed');
+      const restoredSettings = { ...restoreCandidate.settings };
+      resetRestoreSelection();
+      renderRestoredSettings(restoredSettings);
+      showStatus(`Backup restored: ${response.summary.itemCount} product${response.summary.itemCount === 1 ? '' : 's'}.`);
+    } catch (error) {
+      restoreBtn.classList.remove('confirming');
+      restoreBtn.textContent = 'Restore Backup';
+      restoreBtn.disabled = false;
+      showStatus(error.message || 'Could not restore this backup.', 'error');
     }
   });
 

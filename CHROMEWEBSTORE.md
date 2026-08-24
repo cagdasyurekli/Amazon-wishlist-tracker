@@ -2,7 +2,9 @@
 
 > Last Updated: 2026-08-24
 >
-> Release status: preparation checklist only. Publishing requires a separately approved, stable release candidate.
+> Distribution decision: Chrome Web Store publication is not planned and is outside
+> the active product/release scope. This file is retained only as historical planning
+> context; none of its incomplete listing assets or contact fields are release blockers.
 
 ## Store Listing
 
@@ -132,3 +134,4 @@ Use the public repository URL after readback verification.
 |---------|------|---------|--------|
 | 1.0.0 | 2026-07-04 | Initial release | Released |
 | 1.1.0 | 2026-08-24 | Adaptive sync, scale, UI, logo, privacy and security hardening | GitHub source public; Chrome Web Store not submitted |
+| 1.2.0 | 2026-08-24 | Validated backup restore and public-repository automation | GitHub source release only; Chrome Web Store not submitted |

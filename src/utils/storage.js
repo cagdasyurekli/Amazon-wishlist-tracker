@@ -203,6 +203,49 @@ export function updateTrackedItemsWithFinalizer(updater, finalizer) {
 }
 
 /**
+ * Replaces user-owned tracking data under the tracked-item lock. Local data is
+ * written in one storage operation; if the Sync settings write fails, the
+ * exact Local snapshot is restored before the lock is released.
+ * @param {{items: Array<Object>, history: Object, trackedWishlists: Array<Object>, settings: Object}} data
+ * @returns {Promise<void>}
+ */
+export function replaceTrackingData(data) {
+  return withSaveLock(async () => {
+    const localKeys = [
+      StorageKeys.TRACKED_ITEMS,
+      StorageKeys.TRACKED_WISHLISTS,
+      StorageKeys.PRICE_HISTORY,
+      StorageKeys.LAST_SCRAPE_TIME,
+      StorageKeys.SCRAPE_CURSOR,
+      StorageKeys.PRIORITY_SCRAPE_CURSOR,
+      StorageKeys.WISHLIST_SCRAPE_CURSOR,
+      StorageKeys.WISHLIST_SCRAPE_STATE
+    ];
+    const previousLocal = await chrome.storage.local.get(localKeys);
+    const nextLocal = {
+      [StorageKeys.TRACKED_ITEMS]: data.items,
+      [StorageKeys.TRACKED_WISHLISTS]: data.trackedWishlists,
+      [StorageKeys.PRICE_HISTORY]: data.history,
+      [StorageKeys.LAST_SCRAPE_TIME]: null,
+      [StorageKeys.SCRAPE_CURSOR]: 0,
+      [StorageKeys.PRIORITY_SCRAPE_CURSOR]: 0,
+      [StorageKeys.WISHLIST_SCRAPE_CURSOR]: 0,
+      [StorageKeys.WISHLIST_SCRAPE_STATE]: {}
+    };
+
+    await chrome.storage.local.set(nextLocal);
+    try {
+      await setStorageData(StorageKeys.SETTINGS, data.settings, StorageArea.SYNC);
+    } catch (error) {
+      const absentBefore = localKeys.filter((key) => !Object.hasOwn(previousLocal, key));
+      if (absentBefore.length > 0) await chrome.storage.local.remove(absentBefore);
+      if (Object.keys(previousLocal).length > 0) await chrome.storage.local.set(previousLocal);
+      throw error;
+    }
+  });
+}
+
+/**
  * Adds or updates a tracked item. Serialized via the shared mutex to prevent
  * concurrent read-modify-write races on the trackedItems array.
  * @param {Object} item

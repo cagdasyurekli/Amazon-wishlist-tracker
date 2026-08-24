@@ -1,0 +1,39 @@
+name: Feature request
+description: Suggest a product improvement or supported workflow.
+title: "[Feature]: "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or goal
+      description: What user need should this solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Describe the smallest useful outcome.
+    validations:
+      required: true
+  - type: textarea
+    id: privacy
+    attributes:
+      label: Privacy and permission impact
+      description: Note whether this could require new browser permissions, network destinations, or cloud storage.
+  - type: dropdown
+    id: marketplace
+    attributes:
+      label: Amazon marketplace
+      options:
+        - Not marketplace-specific
+        - amazon.com
+        - amazon.co.uk
+        - amazon.de
+        - amazon.fr
+        - amazon.es
+        - amazon.it
+        - amazon.nl
+    validations:
+      required: true

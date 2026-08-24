@@ -83,9 +83,16 @@ async function main() {
     });
     await options.reload({ waitUntil: 'domcontentloaded' });
     await options.waitForSelector('#legacy-target-migration[hidden]');
-    await dashboard.waitForSelector('#legacy-target-warning[hidden]');
     await options.screenshot({ path: path.join(outputDir, 'options-resolved.png'), fullPage: true });
-    await dashboard.screenshot({ path: path.join(outputDir, 'dashboard-resolved.png'), fullPage: true });
+
+    const dashboardResolved = await browser.newPage();
+    dashboardResolved.on('console', recordConsoleError);
+    dashboardResolved.on('pageerror', (error) => consoleErrors.push(error.message));
+    await dashboardResolved.setViewport({ width: 1280, height: 800 });
+    await dashboardResolved.goto(`chrome-extension://${extensionId}/src/dashboard/dashboard.html`, { waitUntil: 'domcontentloaded' });
+    await dashboardResolved.waitForSelector('#legacy-target-warning[hidden]');
+    await dashboardResolved.waitForSelector('.item-card[data-id="BVISUAL001"]');
+    await dashboardResolved.screenshot({ path: path.join(outputDir, 'dashboard-resolved.png'), fullPage: true });
 
     if (consoleErrors.length) {
       throw new Error(`Visual QA captured console errors: ${consoleErrors.join(' | ')}`);
