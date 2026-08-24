@@ -1,26 +1,39 @@
 {
   "name": "amazon-wishlist-tracker",
-  "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
-  "directories": {
-    "doc": "docs"
-  },
+  "version": "1.1.0",
+  "private": true,
+  "description": "Privacy-first Manifest V3 extension for tracking Amazon product and wishlist prices locally.",
   "scripts": {
-    "test": "jest --testPathIgnorePatterns=extension.e2e.test.js",
-    "test:unit": "jest --testPathIgnorePatterns=extension.e2e.test.js",
-    "test:e2e": "NODE_OPTIONS=--experimental-vm-modules jest src/__tests__/extension.e2e.test.js --runInBand"
+    "test": "jest --testPathIgnorePatterns=extension.e2e.test.js scraper.contract.test.mjs network.security.mjs background.security.test.mjs storage.security.test.mjs wishlist.security.test.mjs content.security.e2e.mjs",
+    "test:unit": "jest --testPathIgnorePatterns=extension.e2e.test.js scraper.contract.test.mjs network.security.mjs background.security.test.mjs storage.security.test.mjs wishlist.security.test.mjs content.security.e2e.mjs",
+    "test:scraper-contract": "node --test src/__tests__/scraper.contract.test.mjs",
+    "test:security": "node --test src/__tests__/network.security.mjs && NODE_OPTIONS=--experimental-vm-modules node --test src/__tests__/background.security.test.mjs src/__tests__/storage.security.test.mjs src/__tests__/wishlist.security.test.mjs && node --test src/__tests__/content.security.e2e.mjs",
+    "test:e2e": "NODE_OPTIONS=--experimental-vm-modules jest src/__tests__/extension.e2e.test.js --runInBand",
+    "validate:release": "node scripts/validate-release.mjs",
+    "audit:deps": "npm audit --audit-level=high",
+    "release:check": "npm run audit:deps && npm run validate:release && npm test -- --runInBand && npm run test:scraper-contract && npm run test:security && npm run test:e2e",
+    "prepublishOnly": "npm run release:check"
   },
   "keywords": ["amazon", "wishlist", "tracker", "chrome-extension"],
   "author": "Cagdas Yurekli",
   "license": "MIT",
   "type": "commonjs",
+  "engines": {
+    "node": ">=20"
+  },
   "devDependencies": {
     "jest": "^30.4.2",
     "jest-environment-jsdom": "^30.4.1",
     "puppeteer": "^25.2.1"
   },
-  "dependencies": {
-    "jsdom": "^29.1.1"
+  "overrides": {
+    "js-yaml": "3.15.1",
+    "undici": "7.29.0",
+    "minimatch@3.1.5": {
+      "brace-expansion": "1.1.18"
+    },
+    "minimatch@9.0.9": {
+      "brace-expansion": "2.1.4"
+    }
   }
 }

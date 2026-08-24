@@ -1,105 +1,125 @@
 :root {
-  --bg-color: #ffffff;
-  --text-color: #333333;
-  --card-bg: rgba(255, 255, 255, 0.7);
-  --card-border: rgba(0, 0, 0, 0.08);
-  --primary: #ff9900;
-  --primary-hover: #e38800;
-  --success: #2e7d32;
-  --danger: #d32f2f;
-  --muted: #5f5f66;
-  --chip-bg: rgba(0, 0, 0, 0.05);
+  color-scheme: light dark;
+  --bg: #f7f8fa;
+  --surface: #ffffff;
+  --surface-subtle: #f1f4f5;
+  --signal-soft: #e9f8f3;
+  --text: #172033;
+  --muted: #5f6b7a;
+  --border: #d7dee5;
+  --navy: #132238;
+  --mint: #69d9b6;
+  --mint-hover: #52c9a3;
+  --link: #176b87;
+  --success: #087a55;
+  --danger: #b42318;
+  --focus: #0e806c;
+  --shadow: 0 1px 2px rgba(19, 34, 56, 0.05), 0 8px 20px rgba(19, 34, 56, 0.04);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg-color: #121212;
-    --text-color: #e0e0e0;
-    --card-bg: rgba(30, 30, 30, 0.7);
-    --card-border: rgba(255, 255, 255, 0.12);
-    --primary: #ff9900;
-    --success: #66bb6a;
-    --danger: #ef5350;
-    --muted: #a8a8b2;
-    --chip-bg: rgba(255, 255, 255, 0.1);
+    --bg: #0f141a;
+    --surface: #151c24;
+    --surface-subtle: #1c2630;
+    --signal-soft: #17372f;
+    --text: #f0f4f5;
+    --muted: #a8b3bd;
+    --border: #32404c;
+    --navy: #f0f4f5;
+    --mint: #72e0be;
+    --mint-hover: #8be8cc;
+    --link: #7cc6de;
+    --success: #72e0be;
+    --danger: #ff9b94;
+    --focus: #72e0be;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.25), 0 10px 24px rgba(0, 0, 0, 0.16);
   }
 }
 
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
 
-/* The popup viewport sizes itself from the body content, so heights must be
-   content-driven. Never use 100vh here: it is circular in an extension popup
-   and collapses the layout (seen in production with a large item list). */
 body {
   margin: 0;
-  padding: 0;
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  background: var(--bg-color);
-  color: var(--text-color);
   width: 400px;
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 15px;
 }
 
-.app-container {
-  display: flex;
-  flex-direction: column;
-  background:
-    radial-gradient(circle at top left, rgba(255, 153, 0, 0.16), transparent 42%),
-    linear-gradient(135deg, rgba(255, 153, 0, 0.08) 0%, rgba(255, 255, 255, 0) 100%);
-}
-
-/* ---------- Header ---------- */
+.app-container { background: var(--surface); }
 
 .app-header {
   display: flex;
-  justify-content: space-between;
   align-items: center;
+  justify-content: space-between;
+  gap: 12px;
   padding: 14px 16px;
-  border-bottom: 1px solid var(--card-border);
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
 }
 
-.header-title {
+.brand-block,
+.header-title,
+.header-actions {
   display: flex;
   align-items: center;
-  gap: 8px;
+}
+
+.brand-block { gap: 10px; min-width: 0; }
+.header-title { gap: 8px; }
+.header-actions { gap: 8px; }
+
+.brand-mark {
+  width: 36px;
+  height: 36px;
+  border-radius: 9px;
+}
+
+.brand-name {
+  margin: 0 0 2px;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 .app-header h1 {
   margin: 0;
-  font-size: 1.15rem;
-  font-weight: 600;
+  font-size: 1.08rem;
+  font-weight: 720;
+  letter-spacing: -0.01em;
 }
 
 .count-badge {
-  background: rgba(255, 153, 0, 0.18);
-  color: var(--primary-hover);
-  font-size: 0.75rem;
-  font-weight: 700;
   padding: 2px 8px;
   border-radius: 999px;
-}
-@media (prefers-color-scheme: dark) {
-  .count-badge { color: var(--primary); }
+  background: var(--surface-subtle);
+  color: var(--navy);
+  font-size: 0.76rem;
+  font-weight: 750;
 }
 
-.header-actions {
-  display: flex;
-  gap: 8px;
-}
+button,
+a { -webkit-tap-highlight-color: transparent; }
 
 .icon-btn {
-  width: 34px;
-  height: 34px;
-  background: var(--card-bg);
-  border: 1px solid var(--card-border);
-  border-radius: 8px;
+  display: inline-grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface);
+  color: var(--navy);
   cursor: pointer;
-  font-size: 1.1rem;
-  transition: transform 0.2s ease;
+  font-size: 1rem;
 }
-.icon-btn:hover { transform: rotate(45deg); }
 
-/* ---------- Quick actions ---------- */
+.icon-btn:hover { background: var(--surface-subtle); }
 
 .quick-actions {
   display: flex;
@@ -111,162 +131,128 @@ body {
 .tab-status {
   margin: 0;
   padding: 10px 12px;
-  border-radius: 8px;
-  background: var(--chip-bg);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface);
   color: var(--muted);
   font-size: 0.88rem;
-  font-weight: 500;
+  font-weight: 600;
+  line-height: 1.4;
   text-align: center;
 }
-.tab-status.positive {
-  background: rgba(46, 125, 50, 0.12);
-  color: var(--success);
-  font-weight: 600;
-}
 
-/* ---------- Recent items ---------- */
+.tab-status.positive {
+  border-color: color-mix(in srgb, var(--success) 42%, var(--border));
+  background: color-mix(in srgb, var(--success) 10%, var(--surface));
+  color: var(--success);
+}
 
 .section-label {
   margin: 0 0 6px;
-  font-size: 0.78rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
   color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 750;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 .recent-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
   display: flex;
   flex-direction: column;
   gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
 
 .recent-item {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 9px 12px;
-  background: var(--card-bg);
-  border: 1px solid var(--card-border);
+  padding: 10px 11px;
+  border: 1px solid var(--border);
   border-radius: 10px;
+  background: var(--surface);
+  box-shadow: none;
 }
 
 .recent-title {
   flex: 1;
   min-width: 0;
-  font-size: 0.86rem;
-  font-weight: 500;
-  color: var(--text-color);
-  text-decoration: none;
-  white-space: nowrap;
   overflow: hidden;
+  color: var(--text);
+  font-size: 0.88rem;
+  font-weight: 620;
+  text-decoration: none;
   text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.recent-title:hover { text-decoration: underline; color: var(--primary-hover); }
 
-.recent-price {
-  flex: none;
-  font-size: 0.9rem;
-  font-weight: 700;
-}
+.recent-title:hover { color: var(--link); text-decoration: underline; }
+.recent-price { flex: none; font-size: 0.9rem; font-weight: 750; }
 
 .price-change {
   flex: none;
-  font-size: 0.74rem;
-  font-weight: 700;
   padding: 2px 7px;
   border-radius: 999px;
+  font-size: 0.74rem;
+  font-weight: 750;
 }
-/* A price DROP is good news for a shopper — green. A rise is red. */
-.price-change.change-down { background: rgba(46, 125, 50, 0.14); color: var(--success); }
-.price-change.change-up { background: rgba(211, 47, 47, 0.12); color: var(--danger); }
 
-/* ---------- Empty state ---------- */
+.price-change.change-down { background: color-mix(in srgb, var(--success) 14%, transparent); color: var(--success); }
+.price-change.change-up { background: color-mix(in srgb, var(--danger) 12%, transparent); color: var(--danger); }
 
 .empty-state {
-  text-align: center;
-  color: var(--muted);
   padding: 18px 24px 6px;
+  color: var(--muted);
   line-height: 1.45;
-}
-.empty-icon { font-size: 2.2rem; margin: 0 0 4px; }
-.empty-title {
-  color: var(--text-color);
-  font-weight: 600;
-  font-size: 1rem;
-  margin: 0 0 4px;
+  text-align: center;
 }
 
-/* ---------- Status banner & buttons ---------- */
+.empty-icon { margin: 0 0 4px; font-size: 2rem; }
+.empty-title { margin: 0 0 4px; color: var(--text); font-size: 1rem; font-weight: 700; }
 
 .status-banner {
-  max-height: 0;
   overflow: hidden;
-  opacity: 0;
+  max-height: 0;
   padding: 0 12px;
   border-radius: 8px;
-  font-size: 0.85rem;
-  font-weight: 500;
-  transition: opacity 0.2s ease, max-height 0.2s ease;
-}
-.status-banner.visible {
-  max-height: 60px;
-  opacity: 1;
-  padding: 8px 12px;
-}
-.status-success { background: rgba(46, 125, 50, 0.15); color: var(--success); }
-.status-error { background: rgba(211, 47, 47, 0.15); color: var(--danger); }
-.status-info { background: var(--chip-bg); color: var(--text-color); }
-
-.primary-btn {
-  width: 100%;
-  padding: 10px;
-  background-color: var(--primary);
-  color: white;
-  border: none;
-  border-radius: 8px;
-  font-size: 0.95rem;
+  opacity: 0;
+  font-size: 0.86rem;
   font-weight: 600;
-  cursor: pointer;
-  transition: background 0.2s ease;
+  line-height: 1.4;
+  transition: opacity 0.16s ease, max-height 0.16s ease;
 }
-.primary-btn:hover { background-color: var(--primary-hover); }
-.primary-btn:disabled { opacity: 0.7; cursor: default; }
 
+.status-banner.visible { max-height: 90px; padding: 9px 12px; opacity: 1; }
+.status-success { background: var(--signal-soft); color: var(--success); }
+.status-error { background: color-mix(in srgb, var(--danger) 12%, var(--surface)); color: var(--danger); }
+.status-info { background: var(--surface-subtle); color: var(--text); }
+
+.primary-btn,
 .secondary-btn {
   width: 100%;
-  padding: 10px;
-  background: var(--card-bg);
-  color: var(--text-color);
-  border: 1px solid var(--card-border);
-  border-radius: 8px;
-  font-size: 0.95rem;
-  font-weight: 600;
+  min-height: 40px;
+  padding: 9px 12px;
+  border-radius: 9px;
   cursor: pointer;
-  transition: background 0.2s ease, border-color 0.2s ease;
-}
-.secondary-btn:hover {
-  border-color: var(--primary);
-  color: var(--primary-hover);
+  font: inherit;
+  font-weight: 720;
 }
 
-/* ---------- A11y & fallbacks ---------- */
+.primary-btn { border: 1px solid var(--mint); background: var(--mint); color: #082f2b; }
+.primary-btn:hover { border-color: var(--mint-hover); background: var(--mint-hover); }
+.secondary-btn { border: 1px solid var(--border); background: var(--surface); color: var(--navy); }
+.secondary-btn:hover { border-color: var(--mint); background: var(--surface-subtle); }
+button:disabled { cursor: wait; opacity: 0.62; }
 
-:focus-visible {
-  outline: 2px solid var(--primary);
-  outline-offset: 2px;
-}
+:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
 
 @media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
     transition-duration: 0.01ms !important;
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
   }
-  .icon-btn:hover { transform: none; }
 }

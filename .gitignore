@@ -9,3 +9,7 @@ npm-debug.log
 .vscode/
 .idea/
 .claude/
+
+# Local agent state (never part of a public release)
+.agents/
+.remember/

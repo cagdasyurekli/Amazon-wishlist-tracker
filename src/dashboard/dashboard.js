@@ -1,4 +1,11 @@
-import { getTrackedItems, getStorageData, setStorageData, saveTrackedItem, removeTrackedItem, formatPrice, StorageKeys, StorageArea } from '../utils/storage.js';
+import { getTrackedItems, getStorageData, setStorageData, formatPrice, StorageKeys, StorageArea } from '../utils/storage.js';
+import {
+  getAmazonWishlistId,
+  normalizeStoredAmazonProductUrl,
+  parseCanonicalAmazonProductUrl,
+  parseCanonicalAmazonWishlistUrl,
+  sanitizeAmazonImageUrl
+} from '../utils/amazon.js';
 
 document.addEventListener('DOMContentLoaded', async () => {
   const itemList = document.getElementById('item-list');
@@ -14,14 +21,39 @@ document.addEventListener('DOMContentLoaded', async () => {
   const nextChecksSummary = document.getElementById('next-checks-summary');
 
   let statusTimer = null;
+  function sendBackgroundMessage(message) {
+    return new Promise((resolve) => {
+      chrome.runtime.sendMessage(message, (response) => {
+        if (chrome.runtime.lastError) {
+          resolve({ error: chrome.runtime.lastError.message });
+          return;
+        }
+        resolve(response || { error: 'No response from background worker' });
+      });
+    });
+  }
+
+  async function updateTrackedItem(item) {
+    const response = await sendBackgroundMessage({ type: 'UPDATE_TRACKED_ITEM', item });
+    if (!response.success) throw new Error(response.error || 'Failed to update item');
+  }
+
+  async function deleteTrackedItem(id) {
+    const response = await sendBackgroundMessage({ type: 'REMOVE_TRACKED_ITEM', id });
+    if (!response.success) throw new Error(response.error || 'Failed to remove item');
+  }
+
   function showStatus(message, type = 'info') {
     if (!statusBanner) return;
     statusBanner.textContent = message;
     statusBanner.className = `status-banner status-${type} visible`;
+    statusBanner.setAttribute('role', type === 'error' ? 'alert' : 'status');
     clearTimeout(statusTimer);
-    statusTimer = setTimeout(() => {
-      statusBanner.classList.remove('visible');
-    }, 4000);
+    if (type !== 'error') {
+      statusTimer = setTimeout(() => {
+        statusBanner.classList.remove('visible');
+      }, 4000);
+    }
   }
 
   function getPriceDropDetails(item) {
@@ -106,6 +138,21 @@ document.addEventListener('DOMContentLoaded', async () => {
     return searchable.includes(query);
   }
 
+  function itemMatchesFilter(item, filter) {
+    if (!filter || filter === 'all') return true;
+    if (filter === 'drops') return Boolean(getPriceDropDetails(item));
+    if (filter === 'priority') return Boolean(item.isPriority);
+    if (filter === 'outOfStock') return item.inStock === false;
+    if (filter === 'unchecked') return !item.lastChecked;
+    if (filter === 'targetReached') {
+      const priceReached = Number.isFinite(item.targetPrice) && Number.isFinite(item.currentPrice) && item.currentPrice <= item.targetPrice;
+      const discount = getPriceDropDetails(item)?.percent || 0;
+      const discountReached = Number.isFinite(item.targetDiscountPercentage) && discount >= item.targetDiscountPercentage;
+      return priceReached || discountReached;
+    }
+    return true;
+  }
+
   function getAlarm(name) {
     return new Promise((resolve) => {
       if (!chrome.alarms?.get) {
@@ -126,58 +173,69 @@ document.addEventListener('DOMContentLoaded', async () => {
   async function renderNextCheckSchedule() {
     if (!nextChecksSummary) return;
 
-    const [priceAlarm, priorityAlarm, wishlistAlarm] = await Promise.all([
+    const [priceAlarm, priorityAlarm, wishlistAlarm, wishlistContinuationAlarm, trackedItems] = await Promise.all([
       getAlarm('checkPricesAlarm'),
       getAlarm('checkPriorityPricesAlarm'),
-      getAlarm('checkWishlistsAlarm')
+      getAlarm('checkWishlistsAlarm'),
+      getAlarm('continueWishlistSyncAlarm'),
+      getTrackedItems()
     ]);
 
-    nextChecksSummary.innerHTML = '';
+    nextChecksSummary.replaceChildren();
     [
-      ['Next price batch', priceAlarm?.scheduledTime],
-      ['Priority check', priorityAlarm?.scheduledTime],
-      ['Wishlist sync', wishlistAlarm?.scheduledTime]
+      ['Price checks', priceAlarm?.scheduledTime],
+      ['Fast checks', priorityAlarm?.scheduledTime],
+      ['Wishlist sync', wishlistContinuationAlarm?.scheduledTime || wishlistAlarm?.scheduledTime]
     ].forEach(([label, scheduledTime]) => {
       const chip = document.createElement('span');
       chip.textContent = `${label}: ${formatTimeOnly(scheduledTime)}`;
       nextChecksSummary.appendChild(chip);
     });
+    const standardItems = trackedItems.filter(item => !item.isPriority);
+    const dueCount = standardItems.filter(item =>
+      !Number.isFinite(item.nextPriceCheckAt) || item.nextPriceCheckAt <= Date.now()
+    ).length;
+    const standardCount = standardItems.length;
+    if (standardCount > 0) {
+      const queueChip = document.createElement('span');
+      queueChip.textContent = `${dueCount} product${dueCount === 1 ? '' : 's'} due now`;
+      nextChecksSummary.appendChild(queueChip);
+    }
   }
 
   optionsBtn.addEventListener('click', () => {
     chrome.runtime.openOptionsPage();
   });
 
-  // Default discount input handling
-  const defaultDiscountInput = document.getElementById('default-discount-input');
   const sortSelect = document.getElementById('sort-select');
+  const filterSelect = document.getElementById('filter-select');
+  const PAGE_SIZE = 50;
+  let visibleItemLimit = PAGE_SIZE;
   
   // Load settings
   let settings = await getStorageData(StorageKeys.SETTINGS, StorageArea.SYNC) || {};
-  if (settings.defaultDiscount) {
-    defaultDiscountInput.value = settings.defaultDiscount;
-  }
   if (sortSelect && settings.dashboardSort) {
     const savedSortExists = Array.from(sortSelect.options).some(option => option.value === settings.dashboardSort);
     if (savedSortExists) {
       sortSelect.value = settings.dashboardSort;
     }
   }
-
-  defaultDiscountInput.addEventListener('change', async (e) => {
-    const val = parseInt(e.target.value, 10);
-    if (!isNaN(val) && val >= 0 && val <= 100) {
-      settings.defaultDiscount = val;
-      await setStorageData(StorageKeys.SETTINGS, settings, StorageArea.SYNC);
-      showStatus('Default discount percentage updated.', 'success');
-    }
-  });
+  if (filterSelect && settings.dashboardFilter) {
+    const savedFilterExists = Array.from(filterSelect.options).some(option => option.value === settings.dashboardFilter);
+    if (savedFilterExists) filterSelect.value = settings.dashboardFilter;
+  }
 
   const toggleAllChartsBtn = document.getElementById('toggle-all-charts-btn');
   const appContainer = document.querySelector('.app-container');
   toggleAllChartsBtn.addEventListener('click', () => {
+    const visibleCards = appContainer.querySelectorAll('.item-card').length;
+    if (!appContainer.classList.contains('show-all-charts') && visibleCards > 10) {
+      showStatus('Filter to 10 or fewer visible products before expanding every history.', 'info');
+      return;
+    }
     const isActive = appContainer.classList.toggle('show-all-charts');
-    toggleAllChartsBtn.textContent = isActive ? 'Hide All Charts' : 'Show All Charts';
+    toggleAllChartsBtn.textContent = isActive ? 'Collapse Visible Histories' : 'Expand Visible Histories';
+    toggleAllChartsBtn.setAttribute('aria-expanded', String(isActive));
     renderItems();
   });
 
@@ -187,9 +245,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Conditionally show tracking buttons based on the current page or an open wishlist tab.
   chrome.tabs.query({}, async (tabs) => {
     const activeTab = tabs.find(tab => tab.active && tab.currentWindow) || tabs[0];
-    const isHttp = activeTab?.url?.startsWith('http');
-    const isAmazonProduct = isHttp && activeTab?.url?.includes('amazon.') && (activeTab.url.includes('/dp/') || activeTab.url.includes('/gp/product/'));
-    const isActiveAmazonWishlist = isHttp && activeTab?.url?.includes('amazon.') && activeTab.url.includes('wishlist');
+    const activeProductUrl = parseCanonicalAmazonProductUrl(activeTab?.url || '');
+    const activeWishlistUrl = parseCanonicalAmazonWishlistUrl(activeTab?.url || '');
+    const isAmazonProduct = Boolean(activeProductUrl);
+    const isActiveAmazonWishlist = Boolean(activeWishlistUrl);
     
     const items = await getTrackedItems();
     const trackedWishlists = await getStorageData(StorageKeys.TRACKED_WISHLISTS, StorageArea.LOCAL) || [];
@@ -214,14 +273,13 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     const dashboardImportUrl = new URLSearchParams(window.location.search).get('import') || '';
     const openWishlistTabs = tabs.filter(tab => {
-      const tabUrl = tab?.url || '';
-      return tabUrl.startsWith('http') && tabUrl.includes('amazon.') && tabUrl.includes('wishlist');
+      return Boolean(parseCanonicalAmazonWishlistUrl(tab?.url || ''));
     });
     const trackedWishlistIds = trackedWishlists.map(w => typeof w === 'string' ? w : w.id).filter(Boolean);
     const trackedOpenWishlist = openWishlistTabs.find(tab => trackedWishlistIds.includes(getWishlistId(tab.url)));
     const wishlistUrl = isActiveAmazonWishlist
       ? activeTab.url
-      : (dashboardImportUrl.includes('amazon.') && dashboardImportUrl.includes('wishlist') ? dashboardImportUrl : trackedOpenWishlist?.url);
+      : (parseCanonicalAmazonWishlistUrl(dashboardImportUrl)?.href || trackedOpenWishlist?.url);
     const wishlistId = getWishlistId(wishlistUrl);
     const wishlistInputGroup = document.querySelector('.wishlist-import-group');
 
@@ -254,25 +312,28 @@ document.addEventListener('DOMContentLoaded', async () => {
   addBtn.addEventListener('click', async () => {
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
       const activeTab = tabs[0];
-      if (activeTab?.url?.includes('amazon.')) {
+      if (parseCanonicalAmazonProductUrl(activeTab?.url || '')) {
         chrome.tabs.sendMessage(activeTab.id, { type: 'TRACK_CURRENT_PAGE' }, (response) => {
           if (chrome.runtime.lastError) {
-            alert("Could not communicate with the page. Please reload the Amazon tab and try again.");
+            showStatus('Could not reach the Amazon page. Reload the tab and try again.', 'error');
             return;
           }
           if (response && response.success) {
             renderItems();
+            showStatus('Product added to tracking.', 'success');
+          } else {
+            showStatus('Could not track this product. Try the button on the Amazon page.', 'error');
           }
         });
       } else {
-        alert("Please navigate to an Amazon product page.");
+        showStatus('Open an Amazon product page, then try again.', 'error');
       }
     });
   });
 
   const importBtn = document.getElementById('import-wishlist-btn');
   const wishlistInput = document.getElementById('wishlist-url-input');
-  const mainView = document.querySelector('.app-container:not(#wishlist-selection-view):not(#details-view)');
+  const mainView = document.getElementById('main-view');
   const selectionView = document.getElementById('wishlist-selection-view');
   const detailsView = document.getElementById('details-view');
   const closeDetailsBtn = document.getElementById('close-details-btn');
@@ -281,12 +342,46 @@ document.addEventListener('DOMContentLoaded', async () => {
   const confirmBtn = document.getElementById('confirm-tracking-btn');
   const cancelBtn = document.getElementById('cancel-import-btn');
   const selectionTemplate = document.getElementById('selection-item-template');
+  const selectionStatus = document.getElementById('selection-status');
+  const selectionTitle = document.getElementById('selection-title');
+  const detailsTitle = document.getElementById('details-title');
+  const SELECTION_PAGE_SIZE = 50;
+  let selectionPage = 0;
+  let selectedWishlistIndices = new Set();
+  let viewReturnFocus = null;
   
   let extractedWishlistItems = [];
   let currentWishlistUrl = '';
 
+  function showSelectionStatus(message, type = 'error') {
+    if (!selectionStatus) return;
+    selectionStatus.textContent = message;
+    selectionStatus.className = `view-status status-${type} visible`;
+    selectionStatus.setAttribute('role', type === 'error' ? 'alert' : 'status');
+  }
+
+  function clearSelectionStatus() {
+    if (!selectionStatus) return;
+    selectionStatus.textContent = '';
+    selectionStatus.className = 'view-status';
+    selectionStatus.setAttribute('role', 'status');
+  }
+
+  function openSecondaryView(view, focusTarget, returnTarget) {
+    viewReturnFocus = returnTarget || document.activeElement;
+    mainView.hidden = true;
+    view.hidden = false;
+    requestAnimationFrame(() => focusTarget?.focus());
+  }
+
+  function closeSecondaryView(view) {
+    view.hidden = true;
+    mainView.hidden = false;
+    requestAnimationFrame(() => viewReturnFocus?.focus());
+  }
+
   function getWishlistId(url) {
-    return url?.match(/wishlist\/ls\/([a-zA-Z0-9]+)/)?.[1] || null;
+    return getAmazonWishlistId(url);
   }
 
   function isSameWishlistUrl(a, b) {
@@ -298,7 +393,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   function findVisibleWishlistTab(url, tabs) {
     return tabs.find(tab => {
       const tabUrl = tab?.url || '';
-      return tabUrl.startsWith('http') && tabUrl.includes('amazon.') && isSameWishlistUrl(tabUrl, url);
+      return Boolean(parseCanonicalAmazonWishlistUrl(tabUrl)) && isSameWishlistUrl(tabUrl, url);
     });
   }
 
@@ -337,22 +432,81 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
+  function renderSelectionPage() {
+    selectionList.replaceChildren();
+    const totalPages = Math.max(1, Math.ceil(extractedWishlistItems.length / SELECTION_PAGE_SIZE));
+    selectionPage = Math.min(selectionPage, totalPages - 1);
+    const start = selectionPage * SELECTION_PAGE_SIZE;
+    const pageItems = extractedWishlistItems.slice(start, start + SELECTION_PAGE_SIZE);
+
+    pageItems.forEach((item, pageIndex) => {
+      const itemIndex = start + pageIndex;
+      const clone = selectionTemplate.content.cloneNode(true);
+      const titleEl = clone.querySelector('.selection-title');
+      const priceEl = clone.querySelector('.selection-price');
+      const checkbox = clone.querySelector('.item-checkbox');
+
+      titleEl.textContent = item.title || 'Unknown product';
+      priceEl.textContent = Number.isFinite(item.currentPrice)
+        ? formatPrice(item.currentPrice, item.currency)
+        : 'Price not found';
+      const priceDropSummary = formatPriceDropSummary(item);
+      if (priceDropSummary) priceEl.textContent += ` · ${priceDropSummary}`;
+      checkbox.dataset.index = itemIndex;
+      checkbox.checked = selectedWishlistIndices.has(itemIndex);
+      checkbox.addEventListener('change', () => {
+        if (checkbox.checked) selectedWishlistIndices.add(itemIndex);
+        else selectedWishlistIndices.delete(itemIndex);
+        updateSelectionCounter();
+      });
+      selectionList.appendChild(clone);
+    });
+
+    const pagination = document.createElement('div');
+    pagination.className = 'selection-pagination';
+    const previousButton = document.createElement('button');
+    previousButton.type = 'button';
+    previousButton.textContent = 'Previous 50';
+    previousButton.disabled = selectionPage === 0;
+    previousButton.addEventListener('click', () => {
+      selectionPage -= 1;
+      renderSelectionPage();
+      selectionList.scrollTop = 0;
+    });
+    const pageLabel = document.createElement('span');
+    pageLabel.textContent = `${start + 1}–${start + pageItems.length} of ${extractedWishlistItems.length}`;
+    const nextButton = document.createElement('button');
+    nextButton.type = 'button';
+    nextButton.textContent = 'Next 50';
+    nextButton.disabled = selectionPage >= totalPages - 1;
+    nextButton.addEventListener('click', () => {
+      selectionPage += 1;
+      renderSelectionPage();
+      selectionList.scrollTop = 0;
+    });
+    pagination.append(previousButton, pageLabel, nextButton);
+    selectionList.appendChild(pagination);
+    updateSelectionCounter();
+  }
+
   const importWishlistHandler = async (urlToImport, buttonEl) => {
-    const url = urlToImport.trim();
-    if (!url.includes('amazon.') || !url.includes('wishlist')) {
-      alert("Please enter a valid Amazon Wishlist URL.");
+    const parsedUrl = parseCanonicalAmazonWishlistUrl(urlToImport.trim());
+    if (!parsedUrl) {
+      showStatus('Enter a valid shared Amazon wishlist URL.', 'error');
+      wishlistInput.focus();
       return;
     }
+    const url = parsedUrl.href;
     
     currentWishlistUrl = url;
     const originalText = buttonEl.textContent;
-    buttonEl.textContent = 'Loading (0 products found)...';
+    buttonEl.textContent = 'Reading wishlist (0 products found)…';
     buttonEl.disabled = true;
 
     // Temporary listener to show live progress
     const progressListener = (message) => {
       if (message.type === 'WISHLIST_IMPORT_PROGRESS') {
-        buttonEl.textContent = `Loading (${message.count} products found)...`;
+        buttonEl.textContent = `Reading wishlist (${message.count} products found)…`;
       }
     };
     chrome.runtime.onMessage.addListener(progressListener);
@@ -363,54 +517,43 @@ document.addEventListener('DOMContentLoaded', async () => {
     buttonEl.disabled = false;
 
     if (!response || !response.success) {
-      alert("Failed to extract wishlist. Ensure it is a public/shared wishlist.");
+      showStatus('Could not read this wishlist. Confirm it is shared, then reload the list and try again.', 'error');
+      wishlistInput.focus();
       return;
     }
 
     extractedWishlistItems = response.items || [];
     if (extractedWishlistItems.length === 0) {
-      alert("No items found on this wishlist.");
+      showStatus('No products were found on this wishlist.', 'error');
+      wishlistInput.focus();
       return;
     }
 
-    selectionList.innerHTML = '';
-    extractedWishlistItems.forEach((item, index) => {
-      const clone = selectionTemplate.content.cloneNode(true);
-      const titleEl = clone.querySelector('.selection-title');
-      const priceEl = clone.querySelector('.selection-price');
-      const checkbox = clone.querySelector('.item-checkbox');
-
-      titleEl.textContent = item.title;
-      priceEl.textContent = item.currentPrice ? formatPrice(item.currentPrice, item.currency) : 'Price not found';
-      const priceDropSummary = formatPriceDropSummary(item);
-      if (priceDropSummary) {
-        priceEl.textContent += ` · ${priceDropSummary}`;
-      }
-      checkbox.dataset.index = index;
-      checkbox.addEventListener('change', updateSelectionCounter);
-
-      selectionList.appendChild(clone);
-    });
-
-    updateSelectionCounter();
-    mainView.style.display = 'none';
-    selectionView.style.display = 'flex';
+    selectionPage = 0;
+    selectedWishlistIndices = new Set(extractedWishlistItems.map((_, index) => index));
+    clearSelectionStatus();
+    if (response.limited) {
+      showSelectionStatus('This visible list exceeds the 2,000-product safety limit. Review and import the first 2,000 products shown here.', 'info');
+    }
+    renderSelectionPage();
+    openSecondaryView(selectionView, selectionTitle, buttonEl);
   };
 
   const syncWishlistHandler = async (urlToSync, buttonEl) => {
-    const url = urlToSync.trim();
-    if (!url.includes('amazon.') || !url.includes('wishlist')) {
+    const parsedUrl = parseCanonicalAmazonWishlistUrl(urlToSync.trim());
+    if (!parsedUrl) {
       showStatus('Open the Amazon wishlist tab, then sync again.', 'error');
       return;
     }
+    const url = parsedUrl.href;
 
     const originalText = buttonEl.textContent;
-    setButtonProgress(buttonEl, 'Reading open wishlist...', 'info');
+    setButtonProgress(buttonEl, 'Reading wishlist…', 'info');
     buttonEl.disabled = true;
 
     const progressListener = (message) => {
       if (message.type === 'WISHLIST_IMPORT_PROGRESS') {
-        setButtonProgress(buttonEl, `Syncing (${message.count} products found)...`, 'info');
+        setButtonProgress(buttonEl, `Reading wishlist (${message.count} products found)…`, 'info');
       }
     };
     chrome.runtime.onMessage.addListener(progressListener);
@@ -420,12 +563,17 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (!response || !response.success || !response.items?.length) {
       buttonEl.textContent = originalText;
       buttonEl.disabled = false;
-      showStatus('Could not sync this wishlist. Reload the Amazon tab and try again.', 'error');
+      showStatus('Could not sync this wishlist. Open or reload the shared list, then try again.', 'error');
       return;
     }
 
+    const wishlistId = getWishlistId(url);
+    const syncedItems = response.items.map(item => ({
+      ...item,
+      wishlistIds: wishlistId ? [wishlistId] : []
+    }));
     setButtonProgress(buttonEl, `Saving ${response.items.length} products...`, 'info');
-    chrome.runtime.sendMessage({ type: 'BULK_ADD_TRACKED_ITEMS', items: response.items }, async (saveResponse) => {
+    chrome.runtime.sendMessage({ type: 'BULK_ADD_TRACKED_ITEMS', items: syncedItems }, async (saveResponse) => {
       buttonEl.textContent = originalText;
       buttonEl.disabled = false;
       if (chrome.runtime.lastError || !saveResponse?.success) {
@@ -433,15 +581,21 @@ document.addEventListener('DOMContentLoaded', async () => {
         return;
       }
       await renderItems();
-      showStatus(`Wishlist synced (${response.items.length} products refreshed).`, 'success');
+      showStatus(
+        response.limited
+          ? `Wishlist sync refreshed the first ${response.items.length} visible products (2,000-product safety limit).`
+          : `Wishlist synced (${response.items.length} products refreshed).`,
+        response.limited ? 'info' : 'success'
+      );
     });
   };
 
   const updateSelectionCounter = () => {
-    const checkboxes = selectionList.querySelectorAll('.item-checkbox');
-    const checkedCount = Array.from(checkboxes).filter(cb => cb.checked).length;
     const counter = document.getElementById('selection-counter');
-    if (counter) counter.textContent = `${checkedCount} / ${checkboxes.length} Selected`;
+    const checkedCount = selectedWishlistIndices.size;
+    if (counter) counter.textContent = `${checkedCount} / ${extractedWishlistItems.length} selected`;
+    selectAllCheckbox.checked = extractedWishlistItems.length > 0 && checkedCount === extractedWishlistItems.length;
+    selectAllCheckbox.indeterminate = checkedCount > 0 && checkedCount < extractedWishlistItems.length;
   };
 
   importBtn.addEventListener('click', () => importWishlistHandler(wishlistInput.value, importBtn));
@@ -457,46 +611,49 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   selectAllCheckbox.addEventListener('change', (e) => {
-    const checkboxes = selectionList.querySelectorAll('.item-checkbox');
-    checkboxes.forEach(cb => cb.checked = e.target.checked);
-    updateSelectionCounter();
+    selectedWishlistIndices = e.target.checked
+      ? new Set(extractedWishlistItems.map((_, index) => index))
+      : new Set();
+    renderSelectionPage();
   });
 
   cancelBtn.addEventListener('click', () => {
-    selectionView.style.display = 'none';
-    mainView.style.display = 'flex';
+    clearSelectionStatus();
+    closeSecondaryView(selectionView);
   });
 
   if (closeDetailsBtn) {
     closeDetailsBtn.addEventListener('click', () => {
-      detailsView.style.display = 'none';
-      mainView.style.display = 'flex';
+      closeSecondaryView(detailsView);
     });
   }
 
   confirmBtn.addEventListener('click', () => {
-    const checkboxes = selectionList.querySelectorAll('.item-checkbox');
-    const selectedItems = [];
-    checkboxes.forEach(cb => {
-      if (cb.checked) {
-        selectedItems.push(extractedWishlistItems[cb.dataset.index]);
-      }
-    });
+    const selectedItems = [...selectedWishlistIndices]
+      .sort((a, b) => a - b)
+      .map(index => extractedWishlistItems[index])
+      .filter(Boolean);
 
     if (selectedItems.length === 0) {
-      alert("Please select at least one item.");
+      showSelectionStatus('Select at least one product to continue.', 'error');
+      selectAllCheckbox.focus();
       return;
     }
 
     confirmBtn.textContent = 'Adding...';
     confirmBtn.disabled = true;
 
-    chrome.runtime.sendMessage({ type: 'BULK_ADD_TRACKED_ITEMS', items: selectedItems }, async (response) => {
+    const wishlistId = getWishlistId(currentWishlistUrl);
+    const sourcedItems = selectedItems.map(item => ({
+      ...item,
+      wishlistIds: wishlistId ? [wishlistId] : []
+    }));
+    chrome.runtime.sendMessage({ type: 'BULK_ADD_TRACKED_ITEMS', items: sourcedItems }, async (response) => {
       confirmBtn.textContent = 'Confirm Tracking';
       confirmBtn.disabled = false;
       
       if (chrome.runtime.lastError || !response || !response.success) {
-        alert("Failed to add items.");
+        showSelectionStatus('Could not add the selected products. Try again.', 'error');
       } else {
         // Save the tracked wishlist and autoSync setting
         const autoSyncCheckbox = document.getElementById('auto-sync-checkbox');
@@ -521,9 +678,10 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
 
         wishlistInput.value = '';
-        selectionView.style.display = 'none';
-        mainView.style.display = 'flex';
-        renderItems();
+        clearSelectionStatus();
+        closeSecondaryView(selectionView);
+        await renderItems();
+        showStatus(`${selectedItems.length} product${selectedItems.length === 1 ? '' : 's'} added.`, 'success');
       }
     });
   });
@@ -542,7 +700,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (cardBtn) {
         cardBtn.click();
       } else {
-        alert("Product not found in current view.");
+        showStatus('That product is hidden by the current search or filter. Clear the filters and try again.', 'error');
       }
     });
   }
@@ -550,16 +708,32 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (sortSelect) {
     sortSelect.addEventListener('change', async () => {
       settings.dashboardSort = sortSelect.value;
+      visibleItemLimit = PAGE_SIZE;
+      if (itemList) itemList.scrollTop = 0;
       renderItems();
       await setStorageData(StorageKeys.SETTINGS, settings, StorageArea.SYNC);
     });
   }
   if (itemSearchInput) {
-    itemSearchInput.addEventListener('input', debounce(() => renderItems()));
+    itemSearchInput.addEventListener('input', debounce(() => {
+      visibleItemLimit = PAGE_SIZE;
+      if (itemList) itemList.scrollTop = 0;
+      renderItems();
+    }));
+  }
+  if (filterSelect) {
+    filterSelect.addEventListener('change', async () => {
+      settings.dashboardFilter = filterSelect.value;
+      visibleItemLimit = PAGE_SIZE;
+      if (itemList) itemList.scrollTop = 0;
+      renderItems();
+      await setStorageData(StorageKeys.SETTINGS, settings, StorageArea.SYNC);
+    });
   }
 
   async function renderItems() {
-    itemList.innerHTML = '';
+    const savedScrollTop = itemList ? itemList.scrollTop : 0;
+    itemList.replaceChildren();
     const allItems = await getTrackedItems();
     let items = [...allItems];
     const history = await getStorageData(StorageKeys.PRICE_HISTORY, StorageArea.LOCAL) || {};
@@ -573,9 +747,9 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (backoffUntil && Date.now() < backoffUntil) {
         const resumeDate = new Date(backoffUntil);
         captchaResumeTime.textContent = resumeDate.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
-        captchaBanner.style.display = 'block';
+        captchaBanner.hidden = false;
       } else {
-        captchaBanner.style.display = 'none';
+        captchaBanner.hidden = true;
       }
     }
 
@@ -607,7 +781,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     const query = (itemSearchInput?.value || '').trim().toLowerCase();
     items = items.filter(item => itemMatchesQuery(item, query));
-    if (mainTitle && query) {
+    const activeFilter = filterSelect?.value || 'all';
+    items = items.filter(item => itemMatchesFilter(item, activeFilter));
+    if (mainTitle && (query || activeFilter !== 'all')) {
       mainTitle.textContent = `Tracked Items (${items.length} of ${allItems.length})`;
     }
 
@@ -636,29 +812,46 @@ document.addEventListener('DOMContentLoaded', async () => {
       items.sort((a, b) => (b.addedAt || 0) - (a.addedAt || 0));
     }
 
-    items.forEach((item) => {
+    const filteredItemCount = items.length;
+    const visibleItems = items.slice(0, visibleItemLimit);
+    if (appContainer.classList.contains('show-all-charts') && visibleItems.length > 10) {
+      appContainer.classList.remove('show-all-charts');
+      toggleAllChartsBtn.textContent = 'Expand Visible Histories';
+      toggleAllChartsBtn.setAttribute('aria-expanded', 'false');
+    }
+
+    visibleItems.forEach((item) => {
       const clone = template.content.cloneNode(true);
       const card = clone.querySelector('.item-card');
       card.dataset.id = item.id;
+      const accessibleTitleId = `item-title-${String(item.id).replace(/[^a-zA-Z0-9_-]/g, '')}`;
+      card.setAttribute('aria-labelledby', accessibleTitleId);
       
       const chartBtn = clone.querySelector('.chart-btn');
       if (chartBtn) {
+        const globallyExpanded = appContainer.classList.contains('show-all-charts');
+        chartBtn.setAttribute('aria-expanded', String(globallyExpanded));
+        chartBtn.textContent = globallyExpanded ? 'History shown' : 'History';
+        chartBtn.disabled = globallyExpanded;
         chartBtn.addEventListener('click', () => {
           card.classList.toggle('show-graph');
-          if (card.classList.contains('show-graph')) {
-            requestAnimationFrame(() => renderSparkline(canvas, itemHistory, item.currency));
+          const isExpanded = card.classList.contains('show-graph');
+          chartBtn.setAttribute('aria-expanded', String(isExpanded));
+          chartBtn.textContent = isExpanded ? 'Hide history' : 'History';
+          if (isExpanded) {
+            requestAnimationFrame(prepareChart);
           }
         });
       }
 
       const priorityBtn = clone.querySelector('.priority-btn');
       if (item.isPriority) {
-        priorityBtn.textContent = '⭐️';
         priorityBtn.classList.add('active');
-        priorityBtn.title = 'Remove from Priority Tracking';
+        priorityBtn.setAttribute('aria-pressed', 'true');
+        priorityBtn.title = 'Turn off fast checks';
       } else {
-        priorityBtn.textContent = '☆';
-        priorityBtn.title = 'Add to Priority Tracking (Fast Check)';
+        priorityBtn.setAttribute('aria-pressed', 'false');
+        priorityBtn.title = 'Turn on fast checks';
       }
 
       priorityBtn.addEventListener('click', async () => {
@@ -670,34 +863,41 @@ document.addEventListener('DOMContentLoaded', async () => {
           }
         }
         
-        item.isPriority = !item.isPriority;
-        await saveTrackedItem({ id: item.id, isPriority: item.isPriority });
-        
-        priorityBtn.textContent = item.isPriority ? '⭐️' : '☆';
-        priorityBtn.classList.toggle('active', item.isPriority);
-        priorityBtn.title = item.isPriority ? 'Remove from Priority Tracking' : 'Add to Priority Tracking (Fast Check)';
-        showStatus(item.isPriority ? 'Added to Priority Tracking' : 'Removed from Priority Tracking', 'success');
-        
-        // Update in-memory array for limit checking
-        const index = items.findIndex(i => i.id === item.id);
-        if (index > -1) items[index].isPriority = item.isPriority;
+        const nextPriority = !item.isPriority;
+        priorityBtn.disabled = true;
+        try {
+          await updateTrackedItem({ id: item.id, isPriority: nextPriority });
+          item.isPriority = nextPriority;
+          priorityBtn.classList.toggle('active', item.isPriority);
+          priorityBtn.setAttribute('aria-pressed', String(item.isPriority));
+          priorityBtn.title = item.isPriority ? 'Turn off fast checks' : 'Turn on fast checks';
+          showStatus(item.isPriority ? 'Fast checks turned on.' : 'Fast checks turned off.', 'success');
+          const index = items.findIndex(i => i.id === item.id);
+          if (index > -1) items[index].isPriority = item.isPriority;
+        } catch (error) {
+          showStatus('Could not change the checking speed. Try again.', 'error');
+        } finally {
+          priorityBtn.disabled = false;
+        }
       });
 
       const titleEl = clone.querySelector('.item-title');
       titleEl.textContent = item.title || 'Unknown Product';
+      titleEl.id = accessibleTitleId;
       
       const imgEl = clone.querySelector('.item-image');
-      if (item.imageUrl) {
-        imgEl.src = item.imageUrl;
+      const safeImageUrl = sanitizeAmazonImageUrl(item.imageUrl || '');
+      if (safeImageUrl) {
+        imgEl.src = safeImageUrl;
         imgEl.style.display = 'block';
       }
       
       // Fix legacy items that were hardcoded to amazon.com before the regional fix
-      let productUrl = item.url || `https://${preferredDomain}/dp/${item.id}`;
+      let productUrl = normalizeStoredAmazonProductUrl(item.url, item.id) || `https://${preferredDomain}/dp/${item.id}`;
       if (productUrl.includes('www.amazon.com') && preferredDomain !== 'www.amazon.com') {
         productUrl = productUrl.replace('www.amazon.com', preferredDomain);
       }
-      titleEl.href = productUrl;
+      titleEl.href = normalizeStoredAmazonProductUrl(productUrl, item.id) || '#';
       
       clone.querySelector('.item-price').textContent = formatPrice(item.currentPrice, item.currency);
 
@@ -707,7 +907,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
       const priceDrop = getPriceDropDetails(item);
       if (priceDrop) {
-        discountInfoEl.style.display = 'block';
+        discountInfoEl.hidden = false;
         originalPriceEl.textContent = formatPrice(priceDrop.whenAddedPrice, item.currency);
         discountBadgeEl.textContent = formatPriceDropBadge(priceDrop, item.currency);
       }
@@ -718,6 +918,14 @@ document.addEventListener('DOMContentLoaded', async () => {
       const lastCheckedEl = clone.querySelector('.last-checked');
       if (lastCheckedEl) {
         lastCheckedEl.textContent = `Last checked: ${formatTimestamp(item.lastChecked)}`;
+      }
+
+      const nextCheckEl = clone.querySelector('.next-check');
+      if (nextCheckEl) {
+        nextCheckEl.textContent = item.isPriority && !Number.isFinite(item.nextPriceCheckAt)
+          ? 'Next check: Priority queue'
+          : `Next check: ${formatNextCheck(item.nextPriceCheckAt)}`;
+        nextCheckEl.title = item.checkCadence || (item.isPriority ? 'Priority · 2m queue' : 'Queued for adaptive checking');
       }
 
       const stockEl = clone.querySelector('.stock-status');
@@ -733,6 +941,16 @@ document.addEventListener('DOMContentLoaded', async () => {
       const chartMeta = clone.querySelector('.chart-meta');
       const chartSamples = clone.querySelector('.chart-samples');
       const itemHistory = history[item.id] || [];
+      let chartPrepared = false;
+      const prepareChart = () => {
+        if (chartPrepared) return;
+        chartPrepared = true;
+        if (itemHistory.length > 0) {
+          renderChartMeta(chartMeta, itemHistory, item.currency);
+          renderChartSamples(chartSamples, itemHistory, item.currency);
+          renderSparkline(canvas, itemHistory, item.currency);
+        }
+      };
       if (itemHistory.length === 0) {
         const placeholder = document.createElement('p');
         placeholder.className = 'chart-empty';
@@ -742,18 +960,34 @@ document.addEventListener('DOMContentLoaded', async () => {
         canvas.replaceWith(placeholder);
         if (chartMeta) chartMeta.style.display = 'none';
         if (chartSamples) chartSamples.style.display = 'none';
-      } else {
-        renderChartMeta(chartMeta, itemHistory, item.currency);
-        renderChartSamples(chartSamples, itemHistory, item.currency);
       }
 
-      clone.querySelector('.remove-btn').addEventListener('click', async () => {
-        await removeTrackedItem(item.id);
-        card.remove();
-        if (itemList.querySelectorAll('.item-card').length === 0) {
-          emptyState.style.display = 'block';
+      const removeBtn = clone.querySelector('.remove-btn');
+      let removeConfirmTimer = null;
+      removeBtn.addEventListener('click', async () => {
+        if (!removeBtn.classList.contains('confirming')) {
+          removeBtn.classList.add('confirming');
+          removeBtn.textContent = 'Confirm remove';
+          clearTimeout(removeConfirmTimer);
+          removeConfirmTimer = setTimeout(() => {
+            removeBtn.classList.remove('confirming');
+            removeBtn.textContent = 'Remove';
+          }, 3500);
+          return;
         }
-        showStatus('Item removed.', 'info');
+
+        clearTimeout(removeConfirmTimer);
+        removeBtn.disabled = true;
+        try {
+          await deleteTrackedItem(item.id);
+          await renderItems();
+          showStatus('Item removed.', 'info');
+        } catch (error) {
+          removeBtn.disabled = false;
+          removeBtn.classList.remove('confirming');
+          removeBtn.textContent = 'Remove';
+          showStatus('Could not remove this product. Try again.', 'error');
+        }
       });
 
       const detailsBtn = clone.querySelector('.details-btn');
@@ -768,25 +1002,24 @@ document.addEventListener('DOMContentLoaded', async () => {
             const priceDropSummary = formatPriceDropSummary(item);
             if (priceDropSummary) {
               detailsDiscount.textContent = priceDropSummary;
-              detailsDiscount.style.display = 'flex';
+              detailsDiscount.hidden = false;
             } else {
-              detailsDiscount.style.display = 'none';
+              detailsDiscount.hidden = true;
             }
           }
           
           const historyList = document.getElementById('details-history-list');
-          historyList.innerHTML = '';
+          historyList.replaceChildren();
           if (itemHistory.length === 0) {
-            historyList.innerHTML = '<em>No price history recorded yet.</em>';
+            const emptyHistory = document.createElement('em');
+            emptyHistory.textContent = 'No price history recorded yet.';
+            historyList.appendChild(emptyHistory);
           } else {
             // Reverse so newest is at the top
             const reversedHistory = [...itemHistory].reverse();
             reversedHistory.forEach(entry => {
               const div = document.createElement('div');
-              div.style.display = 'flex';
-              div.style.justifyContent = 'space-between';
-              div.style.padding = '4px 0';
-              div.style.borderBottom = '1px solid rgba(255,255,255,0.1)';
+              div.className = 'history-row';
               
               const dateObj = new Date(entry.timestamp);
               const dateStr = dateObj.toLocaleDateString() + ' ' + dateObj.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
@@ -804,32 +1037,91 @@ document.addEventListener('DOMContentLoaded', async () => {
             });
           }
           
-          mainView.style.display = 'none';
-          detailsView.style.display = 'flex';
+          openSecondaryView(detailsView, detailsTitle, detailsBtn);
         });
       }
 
-      clone.querySelector('.edit-btn').addEventListener('click', async () => {
-        const newTarget = prompt('Enter new target price:', item.targetPrice || item.currentPrice || '');
-        if (newTarget === null) return;
-        const parsed = parseFloat(newTarget);
-        if (!Number.isFinite(parsed) || parsed <= 0) {
-          showStatus('Please enter a valid price.', 'error');
+      const editBtn = clone.querySelector('.edit-btn');
+      const targetEditor = clone.querySelector('.target-editor');
+      const targetInput = clone.querySelector('.target-editor-input');
+      const targetCancelBtn = clone.querySelector('.target-cancel-btn');
+
+      const closeTargetEditor = () => {
+        targetEditor.hidden = true;
+        editBtn.disabled = false;
+      };
+
+      editBtn.addEventListener('click', () => {
+        targetInput.value = Number.isFinite(item.targetPrice) ? item.targetPrice : '';
+        targetEditor.hidden = false;
+        editBtn.disabled = true;
+        targetInput.focus();
+      });
+
+      targetCancelBtn.addEventListener('click', () => {
+        closeTargetEditor();
+        editBtn.focus();
+      });
+      targetInput.addEventListener('keydown', (event) => {
+        if (event.key !== 'Escape') return;
+        event.preventDefault();
+        closeTargetEditor();
+        editBtn.focus();
+      });
+      targetEditor.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const rawValue = targetInput.value.trim();
+        const parsed = rawValue === '' ? null : Number(rawValue);
+        if (parsed !== null && (!Number.isFinite(parsed) || parsed <= 0)) {
+          showStatus('Please enter a valid price or leave it empty to clear.', 'error');
           return;
         }
-        item.targetPrice = parsed;
-        // Persist via the serialized single-item save so we don't clobber a
-        // concurrent background price update with a stale array.
-        await saveTrackedItem({ id: item.id, targetPrice: parsed });
-        targetEl.textContent = `Target: ${formatPrice(parsed, item.currency)}`;
-        showStatus('Target price updated.', 'success');
+
+        const saveButton = targetEditor.querySelector('.target-save-btn');
+        saveButton.disabled = true;
+        try {
+          await updateTrackedItem({ id: item.id, targetPrice: parsed });
+          item.targetPrice = parsed;
+          targetEl.textContent = parsed ? `Target: ${formatPrice(parsed, item.currency)}` : 'No target set';
+          closeTargetEditor();
+          showStatus(parsed ? 'Target price updated.' : 'Target price cleared.', 'success');
+          editBtn.focus();
+        } catch (error) {
+          showStatus('Could not save the target price. Try again.', 'error');
+          targetInput.focus();
+        } finally {
+          saveButton.disabled = false;
+        }
       });
 
       itemList.appendChild(clone);
       if (appContainer.classList.contains('show-all-charts')) {
-        requestAnimationFrame(() => renderSparkline(canvas, itemHistory, item.currency));
+        requestAnimationFrame(prepareChart);
       }
     });
+
+    const pagination = document.createElement('div');
+    pagination.className = 'list-pagination';
+    const paginationText = document.createElement('span');
+    paginationText.textContent = `Showing ${visibleItems.length} of ${filteredItemCount}`;
+    pagination.appendChild(paginationText);
+    if (visibleItems.length < filteredItemCount) {
+      const loadMoreBtn = document.createElement('button');
+      loadMoreBtn.type = 'button';
+      loadMoreBtn.textContent = `Load ${Math.min(PAGE_SIZE, filteredItemCount - visibleItems.length)} more`;
+      loadMoreBtn.addEventListener('click', () => {
+        visibleItemLimit += PAGE_SIZE;
+        renderItems();
+      });
+      pagination.appendChild(loadMoreBtn);
+    }
+    itemList.appendChild(pagination);
+
+    if (savedScrollTop > 0) {
+      requestAnimationFrame(() => {
+        if (itemList) itemList.scrollTop = savedScrollTop;
+      });
+    }
   }
 
   await renderItems();
@@ -857,6 +1149,15 @@ function formatTimeOnly(timestamp) {
   return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
+function formatNextCheck(timestamp) {
+  if (!Number.isFinite(timestamp) || timestamp <= Date.now()) return 'Due now';
+  const minutes = Math.max(1, Math.ceil((timestamp - Date.now()) / 60000));
+  if (minutes < 60) return `in ${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  return remainingMinutes ? `in ${hours}h ${remainingMinutes}m` : `in ${hours}h`;
+}
+
 function getValidHistory(dataPoints) {
   return dataPoints
     .filter((dp) => Number.isFinite(dp.price) && Number.isFinite(dp.timestamp))
@@ -874,7 +1175,7 @@ function renderChartMeta(container, dataPoints, currency) {
   const prices = validPoints.map((dp) => dp.price);
   const latest = validPoints[validPoints.length - 1];
   container.style.display = 'flex';
-  container.innerHTML = '';
+  container.replaceChildren();
 
   [
     `Latest ${formatPrice(latest.price, currency)} · ${formatTimestamp(latest.timestamp)}`,
@@ -891,7 +1192,7 @@ function renderChartMeta(container, dataPoints, currency) {
 function renderChartSamples(container, dataPoints, currency) {
   if (!container) return;
   const validPoints = getValidHistory(dataPoints);
-  container.innerHTML = '';
+  container.replaceChildren();
   if (validPoints.length === 0) {
     container.style.display = 'none';
     return;
@@ -918,6 +1219,10 @@ function renderSparkline(canvas, dataPoints, currency) {
   if (dataPoints.length === 0) return;
 
   const ctx = canvas.getContext('2d');
+  const rootStyles = getComputedStyle(document.documentElement);
+  const lineColor = rootStyles.getPropertyValue('--focus').trim() || '#137f72';
+  const labelColor = rootStyles.getPropertyValue('--text').trim() || '#102a3a';
+  const mutedColor = rootStyles.getPropertyValue('--muted').trim() || '#526a78';
   const rect = canvas.getBoundingClientRect();
   const dpr = window.devicePixelRatio || 1;
   const width = Math.max(1, Math.floor(rect.width));
@@ -952,8 +1257,8 @@ function renderSparkline(canvas, dataPoints, currency) {
 
   ctx.font = '11px Inter, system-ui, sans-serif';
   ctx.lineWidth = 1;
-  ctx.strokeStyle = 'rgba(160, 160, 170, 0.18)';
-  ctx.fillStyle = 'rgba(190, 190, 200, 0.9)';
+  ctx.strokeStyle = 'rgba(82, 106, 120, 0.22)';
+  ctx.fillStyle = mutedColor;
   ctx.textAlign = 'right';
   ctx.textBaseline = 'middle';
 
@@ -975,8 +1280,8 @@ function renderSparkline(canvas, dataPoints, currency) {
   ctx.stroke();
 
   const gradient = ctx.createLinearGradient(0, topPadding, 0, height - bottomPadding);
-  gradient.addColorStop(0, 'rgba(255, 153, 0, 0.22)');
-  gradient.addColorStop(1, 'rgba(255, 153, 0, 0)');
+  gradient.addColorStop(0, 'rgba(121, 223, 192, 0.28)');
+  gradient.addColorStop(1, 'rgba(121, 223, 192, 0)');
 
   ctx.beginPath();
   ctx.moveTo(points[0].x, height - bottomPadding);
@@ -997,21 +1302,21 @@ function renderSparkline(canvas, dataPoints, currency) {
   ctx.lineWidth = 3;
   ctx.lineJoin = 'round';
   ctx.lineCap = 'round';
-  ctx.strokeStyle = '#ff9900';
+  ctx.strokeStyle = lineColor;
   ctx.stroke();
 
   points.forEach((point, index) => {
     if (points.length > 4 && index !== 0 && index !== points.length - 1) return;
     ctx.beginPath();
     ctx.arc(point.x, point.y, 4, 0, Math.PI * 2);
-    ctx.fillStyle = '#ff9900';
+    ctx.fillStyle = lineColor;
     ctx.fill();
     ctx.strokeStyle = 'rgba(18, 18, 18, 0.85)';
     ctx.lineWidth = 1.5;
     ctx.stroke();
 
     if (points.length <= 4 || index === points.length - 1) {
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.92)';
+      ctx.fillStyle = labelColor;
       ctx.textAlign = index === points.length - 1 ? 'right' : 'left';
       ctx.textBaseline = 'bottom';
       ctx.fillText(formatPrice(validPoints[index].price, currency), point.x + (index === points.length - 1 ? -6 : 6), point.y - 6);
@@ -1020,7 +1325,7 @@ function renderSparkline(canvas, dataPoints, currency) {
 
   const first = validPoints[0];
   const last = validPoints[validPoints.length - 1];
-  ctx.fillStyle = 'rgba(160, 160, 170, 0.92)';
+  ctx.fillStyle = mutedColor;
   ctx.textBaseline = 'bottom';
   ctx.textAlign = 'left';
   ctx.fillText(formatTimestamp(first.timestamp), paddingX, height - 4);

@@ -8,9 +8,15 @@
 </head>
 <body>
   <div class="options-container">
-    <header>
-      <h1>Extension Settings</h1>
-      <p>Configure alerts and manage your data.</p>
+    <header class="options-header">
+      <div class="brand-row">
+        <img class="brand-mark" src="../../assets/icon48.png" alt="">
+        <div>
+          <p class="brand-name">Saved Signal</p>
+          <h1>Settings</h1>
+        </div>
+      </div>
+      <p>Configure alert defaults and manage local tracking data.</p>
       <div id="settings-status" class="settings-status" role="status" aria-live="polite"></div>
     </header>
 
@@ -20,18 +26,14 @@
         <div class="form-group">
           <label for="default-discount">Default Discount Alert (%)</label>
           <input type="number" id="default-discount" min="1" max="99" placeholder="e.g. 20">
-          <small>Notify me when any tracked item has a discount that is configured or more.</small>
+          <small>Newly tracked items use this threshold. Enter 1–99, or leave it blank for no default.</small>
         </div>
-        <div class="form-group">
-          <label for="default-target-price">Default Target Price</label>
-          <input type="number" id="default-target-price" step="0.01" min="0" placeholder="e.g. 5.00">
-          <small>Notify me when any tracked item drops to or below this price.</small>
-        </div>
+        <p class="settings-note">Target prices are set per product so values remain correct across Amazon currencies and regions.</p>
       </section>
 
       <section class="settings-card">
         <h2>Data Management</h2>
-        <p>Your data is stored locally and synced via Chrome. No account required.</p>
+        <p>Tracked items and price history stay on this device. Chrome sync is used only for lightweight preferences. No account is required.</p>
         <div class="form-group">
           <label for="history-retention">Keep Price History</label>
           <select id="history-retention">
@@ -40,12 +42,13 @@
             <option value="365">1 Year</option>
             <option value="forever">Forever</option>
           </select>
-          <small>Longer retention uses more local storage space.</small>
+          <small>Longer retention uses more local storage space. Expired history is permanently removed.</small>
         </div>
         <div class="actions">
           <button id="export-btn" class="primary-btn" type="button">Export Data (JSON)</button>
           <button id="clear-history-btn" class="danger-btn" type="button">Clear Price History</button>
         </div>
+        <p class="settings-note">Exports contain product names, Amazon URLs, prices, and history. Clearing history removes charts for every item; price tracking continues.</p>
       </section>
     </main>
   </div>

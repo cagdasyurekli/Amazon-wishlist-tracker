@@ -18,7 +18,12 @@ describe('Amazon HTML Parser (Offscreen Worker)', () => {
     const html = `
       <html>
         <head><title>Robot Check</title></head>
-        <body>Please enter the captcha</body>
+        <body>
+          <form action="/errors/validateCaptcha">
+            <label for="captchacharacters">Please enter the captcha</label>
+            <input id="captchacharacters">
+          </form>
+        </body>
       </html>
     `;
     expect(() => parseAmazonHtml(html, 'https://amazon.com')).toThrow('CAPTCHA_BLOCKED');
@@ -31,7 +36,10 @@ describe('Amazon HTML Parser (Offscreen Worker)', () => {
         <head><title>Amazon.com</title></head>
         <body>
           <p>Type the characters you see in this image:</p>
-          <img src="captcha.jpg" />
+          <form action="/errors/validateCaptcha">
+            <img src="captcha.jpg" />
+            <input name="captchacharacters">
+          </form>
         </body>
       </html>
     `;

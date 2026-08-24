@@ -1,6 +1,8 @@
 # Chrome Web Store Listing — Amazon Wishlist Tracker
 
-> Last Updated: 2026-07-04
+> Last Updated: 2026-08-24
+>
+> Release status: preparation checklist only. Publishing requires a separately approved, stable release candidate.
 
 ## Store Listing
 
@@ -9,31 +11,31 @@ Amazon Wishlist Tracker
 
 
 **Short Description**
-Premium Amazon price and stock tracker with history charts and smart alerts.
+Track Amazon product and wishlist prices locally with history, targets, and smart alerts.
 
 
 **Detailed Description**
-Amazon Wishlist Tracker is a privacy-first, powerful tool that automatically tracks prices, stock availability, and price drops for any product on Amazon directly from your browser. 
+Amazon Wishlist Tracker is an independent, privacy-first Chrome extension that tracks supported Amazon product and wishlist prices directly from your browser.
 
 Features:
-- Track entire Amazon Wishlists with a single click
+- Import public/shared Amazon wishlists and optionally keep product membership in sync
 - Monitor individual products directly from any Amazon product page
-- View detailed price history sparklines to know if you're getting a good deal
+- View timestamped price history and recent fetch values in the dashboard
 - Receive automatic notifications for price drops and restocks
+- Set per-product target prices and prioritize selected products
 - Support for multiple Amazon regions (.com, .nl, .de, .fr, .es, .it, .co.uk)
-- 100% Privacy-focused: All tracking data and price history is stored entirely locally on your device. No cloud syncing, no data collection, and no external accounts required.
+- No developer backend, analytics SDK, advertising SDK, or extension account
 
 How to use:
-1. Navigate to any Amazon product page and click the "👀 Track Price" button.
-2. Alternatively, open your Amazon Wishlist and click "Track This Wishlist" in the extension Dashboard to import all items at once.
-3. Open the extension popup to view your tracked items, current prices, and visual price histories.
-4. Set up custom discount alerts and sit back while the extension checks prices in the background.
+1. Navigate to any Amazon product page and click the "Track price" button.
+2. Alternatively, open a public/shared Amazon Wishlist and choose "Import This Wishlist" to review and import its items.
+3. Open the dashboard to search, filter, inspect price history, and manage targets or priorities.
+4. Configure discount alerts and let bounded background checks refresh due products.
 
 Privacy Note:
-Your data is yours. This extension operates completely locally. It fetches price data directly from Amazon to your browser. No data is ever sent to third-party servers.
+Tracked products, wishlist URLs, price history, and scraper state are stored in Chrome local extension storage. Lightweight preferences use Chrome Sync when enabled. The browser sends direct refresh requests to supported Amazon domains; there is no developer-operated backend or analytics service. JSON export is an explicit local download containing product and history data. See `PRIVACY.md` for the complete disclosure.
 
-Support:
-If you find this tool helpful, consider supporting the developer via the options menu!
+Amazon and the Amazon logo are trademarks of Amazon.com, Inc. or its affiliates. This independent project is not affiliated with or endorsed by Amazon.
 
 
 **Category**
@@ -52,7 +54,7 @@ English
 
 | Asset | Dimensions | Status | Filename |
 |-------|-----------|--------|----------|
-| Store Icon | 128×128 PNG | 🟡 Needs check | `assets/icon128.png` |
+| Store Icon | 128×128 transparent PNG | ✅ Validated locally | `assets/icon128.png` |
 | Screenshot 1 | 1280×800 or 640×400 | ⬜ Not created | |
 | Screenshot 2 | 1280×800 or 640×400 | ⬜ Not created | |
 | Screenshot 3 | 1280×800 or 640×400 | ⬜ Not created | |
@@ -63,9 +65,9 @@ English
 
 
 ### Screenshot Notes
-- **Screenshot 1**: Show the extension popup open with a list of tracked items and price history sparklines.
+- **Screenshot 1**: Show the bounded quick-actions popup with three product highlights.
 - **Screenshot 2**: Show the Dashboard importing a large wishlist with the "Price dropped" badges visible.
-- **Screenshot 3**: Show the "👀 Track Price" button injected into an Amazon product page.
+- **Screenshot 3**: Show the "Track price" button injected into an Amazon product page.
 - **Screenshot 4**: Show the options page highlighting the privacy-first local storage settings.
 
 
@@ -79,14 +81,14 @@ English
 | `notifications` | permissions | Required to alert the user immediately when a tracked item drops in price or comes back in stock. |
 | `offscreen` | permissions | Required to accurately parse Amazon's product and wishlist HTML in the background using DOM APIs not available in service workers. |
 | `tabs` | permissions | Required to determine if the user is currently viewing an Amazon wishlist to offer contextual import features. |
-| `*://*.amazon.com/*` (and EU regions) | host_permissions | Required to fetch real-time price and stock data directly from Amazon domains on the user's behalf. |
+| `https://*.amazon.com/*` (and supported EU HTTPS regions) | host_permissions | Required to fetch real-time price and stock data directly from Amazon domains on the user's behalf. |
 
 
 ## Privacy & Data Use
 
 ### Data Collection
 
-**Does the extension collect user data?** No
+**Does the developer collect user data?** No. Direct Amazon requests and optional Chrome preference sync are disclosed in `PRIVACY.md`.
 
 ### Data Use Certification
 - [x] Data is NOT sold to third parties
@@ -96,35 +98,37 @@ English
 
 ## Privacy Policy
 
-**Privacy Policy URL** 
-*Recommendation: Host a simple text page on GitHub Pages or Notion stating that "Amazon Wishlist Tracker stores all data locally and transmits absolutely no personal information or tracking data to any third parties."*
+**Privacy Policy URL**
+Use the public repository URL for `PRIVACY.md` after the repository is published. Verify the final URL before store submission.
 
 
 ## Distribution
 
-**Visibility**: Public
-**Regions**: All regions
+**Visibility**: Public after separately approved publication
+
+**Regions**: Supported Amazon regions only
+
 **Pricing**: Free
 
 
 ## Developer Info
 
-**Publisher Name** 
-[Your Name]
+**Publisher Name**
+Cagdas Yurekli
 
-**Contact Email** 
-[Your Email]
+**Contact Email**
+Required before submission; do not publish with a placeholder.
 
-**Support URL / Email** 
-[Your Link]
+**Support URL / Email**
+Required before submission; use a public support route that does not expose security reports.
 
-**Homepage URL** 
-[Your Link]
+**Homepage URL**
+Use the public repository URL after readback verification.
 
 
 ## Version History
 
 | Version | Date | Changes | Status |
 |---------|------|---------|--------|
-| 1.0.0 | 2026-07-04 | Initial Release | Draft |
-
+| 1.0.0 | 2026-07-04 | Initial release | Released |
+| 1.1.0 | 2026-08-24 | Adaptive sync, scale, UI, logo, privacy and security hardening | Local release candidate; not yet published |

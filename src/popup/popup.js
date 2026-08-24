@@ -1,4 +1,5 @@
 import { getTrackedItems, getStorageData, formatPrice, StorageKeys, StorageArea } from '../utils/storage.js';
+import { normalizeStoredAmazonProductUrl } from '../utils/amazon.js';
 
 // The popup is a quick-glance surface: current-tab action + a few recent
 // items. The full list lives in the dashboard — rendering hundreds of cards
@@ -31,9 +32,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     statusBanner.textContent = message;
     statusBanner.className = `status-banner status-${type} visible`;
     clearTimeout(statusTimer);
-    statusTimer = setTimeout(() => {
-      statusBanner.classList.remove('visible');
-    }, 4000);
+    if (type !== 'error') {
+      statusTimer = setTimeout(() => {
+        statusBanner.classList.remove('visible');
+      }, 4000);
+    }
   }
 
   function openDashboard(query = '') {
@@ -64,6 +67,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     countBadge.hidden = items.length === 0;
     countBadge.textContent = items.length;
+    countBadge.setAttribute('aria-label', `${items.length} tracked item${items.length === 1 ? '' : 's'}`);
     emptyState.hidden = items.length !== 0;
     openDashboardBtn.textContent = items.length > 0
       ? `View All ${items.length} Items`
@@ -99,8 +103,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 
       const titleEl = clone.querySelector('.recent-title');
       titleEl.textContent = item.title || 'Unknown Product';
-      if (item.url) {
-        titleEl.href = item.url;
+      const productUrl = normalizeStoredAmazonProductUrl(item.url, item.id);
+      if (productUrl) {
+        titleEl.href = productUrl;
         titleEl.title = 'Open on Amazon';
       } else {
         titleEl.removeAttribute('href');

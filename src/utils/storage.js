@@ -21,6 +21,8 @@ export const StorageKeys = {
   LAST_SCRAPE_TIME: 'lastScrapeTime',
   SCRAPE_CURSOR: 'scrapeCursor',
   PRIORITY_SCRAPE_CURSOR: 'priorityScrapeCursor',
+  WISHLIST_SCRAPE_CURSOR: 'wishlistScrapeCursor',
+  WISHLIST_SCRAPE_STATE: 'wishlistScrapeState',
   CAPTCHA_BACKOFF_UNTIL: 'captchaBackoffUntil',
   CAPTCHA_BACKOFF_ATTEMPTS: 'captchaBackoffAttempts'
 };
@@ -59,6 +61,16 @@ export async function setStorageItems(values, area = StorageArea.SYNC) {
 }
 
 /**
+ * Removes a key from chrome storage.
+ * @param {string} key
+ * @param {string} area 'sync' or 'local'
+ * @returns {Promise<void>}
+ */
+export async function removeStorageData(key, area = StorageArea.SYNC) {
+  await chrome.storage[area].remove(key);
+}
+
+/**
  * Formats a numeric price with an optional currency symbol, or 'N/A' when the
  * price is not a finite number. Shared by the popup and the background alerts.
  * @param {number} price
@@ -76,14 +88,36 @@ export function formatPrice(price, currency) {
  */
 export async function getTrackedItems() {
   const localItems = await getStorageData(StorageKeys.TRACKED_ITEMS, StorageArea.LOCAL);
-  if (localItems) {
+  if (Array.isArray(localItems)) {
+    // Repair profiles migrated by an older build that copied trackedItems to
+    // local storage but left the privacy-sensitive legacy Sync key behind.
+    try {
+      const residualSyncItems = await getStorageData(StorageKeys.TRACKED_ITEMS, StorageArea.SYNC);
+      if (Array.isArray(residualSyncItems)) {
+        await removeStorageData(StorageKeys.TRACKED_ITEMS, StorageArea.SYNC);
+      }
+    } catch (err) {
+      // Local data remains authoritative and usable. A later read retries this
+      // idempotent cleanup if Chrome Sync is temporarily unavailable.
+      console.warn('Could not remove legacy tracked items from Chrome Sync:', err);
+    }
     return localItems;
   }
 
   const legacySyncItems = await getStorageData(StorageKeys.TRACKED_ITEMS, StorageArea.SYNC);
-  if (legacySyncItems) {
+  if (Array.isArray(legacySyncItems)) {
     await setStorageData(StorageKeys.TRACKED_ITEMS, legacySyncItems, StorageArea.LOCAL);
-    return legacySyncItems;
+    const persistedItems = await getStorageData(StorageKeys.TRACKED_ITEMS, StorageArea.LOCAL);
+    if (!Array.isArray(persistedItems) || JSON.stringify(persistedItems) !== JSON.stringify(legacySyncItems)) {
+      throw new Error('Legacy tracked-item migration could not be verified.');
+    }
+    try {
+      await removeStorageData(StorageKeys.TRACKED_ITEMS, StorageArea.SYNC);
+    } catch (err) {
+      // The verified local copy is safe to use; future reads retry deletion.
+      console.warn('Could not remove legacy tracked items from Chrome Sync:', err);
+    }
+    return persistedItems;
   }
 
   return [];
@@ -108,14 +142,28 @@ function withSaveLock(fn) {
 }
 
 /**
+ * Performs an atomic read-modify-write of tracked items within this extension
+ * context. Use this for batch merges so long-running jobs apply their results
+ * to the latest collection instead of replacing it with a stale snapshot.
+ * @param {(items: Array<Object>) => Array<Object>} updater
+ * @returns {Promise<void>}
+ */
+export function updateTrackedItems(updater) {
+  return withSaveLock(async () => {
+    const items = await getTrackedItems();
+    const next = updater(items);
+    await setStorageData(StorageKeys.TRACKED_ITEMS, next, StorageArea.LOCAL);
+  });
+}
+
+/**
  * Adds or updates a tracked item. Serialized via the shared mutex to prevent
  * concurrent read-modify-write races on the trackedItems array.
  * @param {Object} item
  * @returns {Promise<void>} resolves once this item's write has persisted
  */
 export function saveTrackedItem(item) {
-  return withSaveLock(async () => {
-    const items = await getTrackedItems();
+  return updateTrackedItems((items) => {
     const existingIndex = items.findIndex(i => i.id === item.id);
 
     if (existingIndex > -1) {
@@ -124,18 +172,8 @@ export function saveTrackedItem(item) {
       items.push({ ...item, addedAt: Date.now(), updatedAt: Date.now() });
     }
 
-    await setStorageData(StorageKeys.TRACKED_ITEMS, items, StorageArea.LOCAL);
+    return items;
   });
-}
-
-/**
- * Replaces the tracked item collection in a single storage write.
- * Use this for background batch jobs so sync storage is not rewritten once per
- * scraped product.
- * @param {Array<Object>} items
- */
-export async function saveTrackedItems(items) {
-  await setStorageData(StorageKeys.TRACKED_ITEMS, items, StorageArea.LOCAL);
 }
 
 /**
@@ -146,16 +184,26 @@ export async function saveTrackedItems(items) {
  * @returns {Promise<void>}
  */
 export function removeTrackedItem(id) {
+  return updateTrackedItems((items) => items.filter(i => i.id !== id));
+}
+
+/**
+ * Performs a serialized read-modify-write of local price history. Background
+ * scrape jobs use this to merge only the samples they produced into the latest
+ * stored history instead of replacing concurrent samples with a stale snapshot.
+ * @param {(history: Object<string, Array<Object>>) => Object<string, Array<Object>>} updater
+ * @returns {Promise<void>}
+ */
+export function updatePriceHistory(updater) {
   return withSaveLock(async () => {
-    const items = await getTrackedItems();
-    const next = items.filter(i => i.id !== id);
-    await setStorageData(StorageKeys.TRACKED_ITEMS, next, StorageArea.LOCAL);
+    const history = await getStorageData(StorageKeys.PRICE_HISTORY, StorageArea.LOCAL) || {};
+    const next = updater(history);
+    await setStorageData(StorageKeys.PRICE_HISTORY, next, StorageArea.LOCAL);
   });
 }
 
 /**
- * Prunes old price history to prevent local storage from exceeding limits.
- * Keeps only 1 data point per day for data older than 30 days.
+ * Prunes price history outside the configured retention period.
  */
 export async function prunePriceHistory() {
   const settings = await getStorageData(StorageKeys.SETTINGS, StorageArea.SYNC) || {};
@@ -169,30 +217,24 @@ export async function prunePriceHistory() {
   const daysToKeep = parseInt(retention, 10);
   const cutoffTime = Date.now() - (daysToKeep * 24 * 60 * 60 * 1000);
 
-  const history = await getStorageData(StorageKeys.PRICE_HISTORY, StorageArea.LOCAL) || {};
   let prunedCount = 0;
-  
-  for (const itemId in history) {
-    const dataPoints = history[itemId];
-    if (!Array.isArray(dataPoints)) continue;
 
-    const daySeen = new Set();
-    history[itemId] = dataPoints.filter(dp => {
-      if (dp.timestamp > cutoffTime) return true; // Keep recent
+  await updatePriceHistory((history) => {
+    const prunedHistory = { ...history };
+    for (const itemId in prunedHistory) {
+      const dataPoints = prunedHistory[itemId];
+      if (!Array.isArray(dataPoints)) continue;
 
-      // For old data, keep only if it's the first one we see for that day
-      const day = new Date(dp.timestamp).toDateString();
-      if (!daySeen.has(day)) {
-        daySeen.add(day);
-        return true;
-      }
-      prunedCount++;
-      return false;
-    });
-  }
+      prunedHistory[itemId] = dataPoints.filter(dp => {
+        const keep = Number.isFinite(dp.timestamp) && dp.timestamp >= cutoffTime;
+        if (!keep) prunedCount++;
+        return keep;
+      });
+    }
+    return prunedHistory;
+  });
 
   if (prunedCount > 0) {
     console.log(`Pruned ${prunedCount} old price history data points.`);
-    await setStorageData(StorageKeys.PRICE_HISTORY, history, StorageArea.LOCAL);
   }
 }

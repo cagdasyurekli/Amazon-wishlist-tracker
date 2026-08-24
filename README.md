@@ -1,64 +1,75 @@
 # Amazon Wishlist Tracker
 
-A privacy-first Manifest V3 Chrome extension to track Amazon product and wishlist prices locally. All data stays on your machine, with no external backend or tracking.
+A privacy-first Manifest V3 Chrome extension that tracks Amazon product and wishlist prices without an external application backend.
 
-## Key Features
+## What it does
 
-- **Local Storage**: All your tracked items, price history, and settings are saved securely in your browser using `chrome.storage.local`.
-- **Wishlist Sync**: Easily import entire Amazon wishlists and keep track of price drops across multiple items.
-- **Price History Charts**: View interactive sparkline charts of price trends right in the extension popup and detailed charts in the dashboard.
-- **Restock Alerts**: Get notified when an out-of-stock item you're tracking becomes available again.
-- **Priority Tracking**: Mark items as priority for more frequent background scraping.
-- **Multi-region Support**: Works with `.com`, `.co.uk`, `.de`, `.fr`, `.es`, `.it`, and `.nl` Amazon domains.
+- Tracks products from supported Amazon regions: `.com`, `.co.uk`, `.de`, `.fr`, `.es`, `.it`, and `.nl`.
+- Imports public or shared wishlists and can keep their product membership in sync.
+- Uses bounded adaptive price checks, a separate priority queue, and anti-bot backoff.
+- Shows timestamped price history, availability, targets, and Amazon wishlist price-drop metadata.
+- Sends local Chrome notifications for configured price, discount, and restock conditions.
 
-## Installation
+## Privacy model
 
-Because this is a locally-developed extension without a build step, you can load it directly into Chrome:
+Tracked products, wishlist URLs, price history, and scraper state are stored in `chrome.storage.local`. Lightweight preferences such as dashboard sort/filter choices and the default discount threshold use `chrome.storage.sync` and may therefore be synchronized by Chrome when the user enables browser sync.
 
-1. Open Chrome and navigate to `chrome://extensions/`.
-2. Enable **Developer mode** (toggle switch in the top right corner).
-3. Click the **Load unpacked** button.
-4. Select the directory containing this repository.
-5. The extension will appear in your toolbar. Pin it for quick access!
+The extension has no analytics SDK, advertising SDK, account system, or developer-operated backend. It makes direct requests from the browser to the supported Amazon domains to refresh product and wishlist information. See [PRIVACY.md](PRIVACY.md) for the complete data flow and deletion guidance.
 
-## Usage
+## Install from source
 
-- **Track a Product**: Navigate to any Amazon product page. Click the extension icon and select "Track This Product".
-- **Import a Wishlist**: Navigate to an Amazon wishlist page. Click the extension icon and select "Import This Wishlist", or use the `Sync Wishlist` feature in the dashboard.
-- **Dashboard**: Click the "View All" button in the popup to open the Dashboard. Here you can search, filter, view detailed price history, and manage your tracked items.
+1. Download or clone this repository.
+2. Open `chrome://extensions/`.
+3. Enable **Developer mode**.
+4. Select **Load unpacked** and choose the repository directory.
+5. Pin **Amazon Wishlist Tracker** from Chrome's extensions menu if desired.
 
-## Development
+There is no production build step; Chrome executes the checked-in extension source directly.
 
-There is no build step. The source code is executed directly.
+## Use
 
-### Running Tests
+- On a supported Amazon product page, open the extension and choose **Track This Product**.
+- On a public/shared wishlist, choose **Import This Wishlist**, or paste its URL into the dashboard.
+- Use the dashboard to search, filter, inspect history, set per-product target prices, prioritize checks, and manage tracked items.
+- Enable **Keep List in Sync** only when new and removed wishlist membership should be reconciled automatically. Items tracked independently or by another wishlist are preserved.
 
-To run the test suite, you need Node.js installed.
+## Development and verification
 
-1. Install dependencies:
-   ```bash
-   npm install
-   ```
-2. Run unit tests (uses jsdom, no browser needed):
-   ```bash
-   npm test
-   ```
-3. Run E2E tests (launches headless Chromium via Puppeteer to test extension UI):
-   ```bash
-   npm run test:e2e
-   ```
+Requirements: Node.js 20 or newer and a locally available Chrome/Chromium supported by Puppeteer.
 
-### Architecture Overview
+```bash
+npm ci
+npm test -- --runInBand
+npm run test:scraper-contract
+npm run test:e2e
+```
 
-- **Service Worker (`src/background/`)**: Manages alarms and orchestrates scraping jobs. Persists data to `chrome.storage`.
-- **Offscreen Document (`src/background/offscreen.html`)**: Used solely for its `DOMParser` capability to parse Amazon HTML safely in the background.
-- **Content Scripts (`src/content/`)**: Injected into Amazon pages to detect products/wishlists and inject the native "Track Price" button.
-- **Popup & Dashboard (`src/popup/`, `src/dashboard/`)**: The user interfaces for managing tracked items.
+Before preparing a public release candidate, run:
 
-## AI Agent Guidelines
+```bash
+npm run audit:deps
+npm run release:check
+```
 
-If you are an AI assistant (Claude, Gemini, Codex, etc.) working on this repository, please read the following files before making changes:
-- `AGENTS.md`
-- `GEMINI.md`
-- `CLAUDE.md`
-- `docs/lessons_learned.md`
+`release:check` audits dependencies, validates manifest references, icon dimensions/transparency, package/manifest/lockfile version parity, production dependency absence, local extension assets, unit tests, scraper continuation contracts, Chrome E2E tests, and `git diff --check` when executed in a Git worktree. The dependency-audit step requires current registry access.
+
+## Architecture
+
+- `src/background/`: MV3 service worker scheduling, serialized scrape jobs, notifications, and offscreen parsing orchestration.
+- `src/background/offscreen.html`: local DOM parsing surface used because service workers do not provide `DOMParser`.
+- `src/content/`: Amazon page detection, visible wishlist extraction, and the in-page tracking action.
+- `src/popup/`: bounded quick-actions popup.
+- `src/dashboard/`: full list, wishlist, history, target, filter, and priority management.
+- `src/options/`: global preferences, local JSON export, and price-history deletion.
+- `src/__tests__/`: parser, scheduler-contract, and real Chromium extension tests.
+
+## Public project guidance
+
+- Security policy and reporting: [SECURITY.md](SECURITY.md)
+- Privacy and data lifecycle: [PRIVACY.md](PRIVACY.md)
+- Release history: [CHANGELOG.md](CHANGELOG.md)
+- Stable-candidate acceptance: [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md)
+- Contributions and local verification: [CONTRIBUTING.md](CONTRIBUTING.md)
+- Chrome Web Store preparation checklist: [CHROMEWEBSTORE.md](CHROMEWEBSTORE.md)
+
+Amazon and the Amazon logo are trademarks of Amazon.com, Inc. or its affiliates. This independent project is not affiliated with or endorsed by Amazon.

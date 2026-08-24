@@ -4,7 +4,8 @@
   <meta charset="UTF-8">
   <title>Popup Preview Harness</title>
   <style>
-    body { margin: 0; background: #d7dbe0; display: flex; justify-content: center; padding: 24px; font-family: sans-serif; }
+    body { margin: 0; background: #e4e7ec; display: flex; justify-content: center; padding: 24px; font-family: sans-serif; }
+    body.dark { background: #0d1015; }
     .frame-wrap { box-shadow: 0 12px 40px rgba(0,0,0,0.35); border-radius: 10px; overflow: hidden; }
     /* Like a real extension popup: height derives from content (max 600px).
        A fixed iframe height previously masked a 100vh collapse bug. */
@@ -17,18 +18,33 @@
     <!-- The popup runs inside an iframe at its real 400x600 size. -->
     <iframe id="popup-frame" title="Extension popup preview"></iframe>
   </div>
-  <p class="hint">Harness: ?empty=1 for empty state · ?fail=1 for messaging failure</p>
+  <p class="hint">Harness: ?tab=product|wishlist|other · ?empty=1 · ?fail=1 · ?theme=dark · ?zoom=2 · ?reduced=1</p>
   <script>
     (async () => {
+      const params = new URLSearchParams(location.search);
+      if (params.get('theme') === 'dark') document.body.classList.add('dark');
       const res = await fetch('../src/popup/popup.html');
       let html = await res.text();
-      // Inject a <base> so the popup's relative asset paths resolve, and the
-      // chrome.* mock so popup.js runs outside the extension context.
+      // Make executable/style URLs absolute before assigning srcdoc. This
+      // avoids speculative /preview/popup.* requests before a relative base is
+      // applied, while the module's own imports still resolve from its URL.
+      html = html
+        .replace('href="popup.css"', 'href="/src/popup/popup.css"')
+        .replace('src="popup.js"', 'src="/src/popup/popup.js"');
+      // Inject the chrome.* mock so popup.js runs outside extension context.
       html = html.replace(
         '<head>',
-        '<head><base href="../src/popup/"><script src="../../preview/mock-chrome.js"><\/script>'
+        '<head><script src="/preview/mock-chrome.js"><\/script>'
       );
+      if (params.get('theme') === 'dark') {
+        html = html.replace('</head>', '<style>:root{--bg:#0f141a;--surface:#151c24;--surface-subtle:#1c2630;--signal-soft:#17372f;--text:#f0f4f5;--muted:#a8b3bd;--border:#32404c;--navy:#f0f4f5;--link:#7cc6de;--success:#72e0be;--danger:#ff9c95;--focus:#72e0be}</style></head>');
+      }
+      if (params.get('reduced')) {
+        html = html.replace('</head>', '<style>*,*::before,*::after{transition:none!important;animation:none!important}</style></head>');
+      }
       const frame = document.getElementById('popup-frame');
+      const zoom = Number(params.get('zoom'));
+      if (Number.isFinite(zoom) && zoom > 0) frame.style.zoom = String(Math.min(2, zoom));
       frame.srcdoc = html;
 
       // Emulate Chrome's popup sizing: grow the frame to fit content, capped

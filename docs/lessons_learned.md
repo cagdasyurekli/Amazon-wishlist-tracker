@@ -8,6 +8,33 @@ Severity legend: 🔴 critical (will break for real users / risk of ban) · 🟠
 
 ---
 
+## 0H. Security Boundaries Without Product Regressions (Codex, 2026-08-24)
+
+- 🔴 **Freeform marketplace text is not an authority signal.** CAPTCHA and purchased words can appear in titles, descriptions, or injected row text. CAPTCHA requires both semantic and structural challenge evidence; purchased text must never delete a product/history or cause a destructive-state notification.
+- 🔴 **A successful HTTP status is not a complete wishlist.** Login pages, generic shells, interstitials, duplicate pages, and incomplete markup are `indeterminate`. Only a structurally identified terminal wishlist page may authorize missing-item reconciliation.
+- 🟠 **Network bounds must cover the body and parser, not only response headers.** Keep the timeout active through streamed body consumption and offscreen parsing; enforce HTTPS host/identity-preserving redirects, HTML content type, per-page bytes, traversal bytes/items/pages/time, and persisted-state size.
+- 🟠 **Continuation fairness is part of availability.** Persist cumulative counters, advance the wishlist cursor after every partial chunk, and schedule the next continuation after about 60 seconds. A large or hostile list must not starve other lists; budget exhaustion discards only partial operational state.
+- 🟠 **Security gates need positive compatibility proof.** Alongside malicious fixtures, cover all supported Amazon storefronts, regional image CDNs, realistic lazy-image wishlist markup, an existing-item tracking flow, a genuine browser click, large-list UI, and restart recovery. A rejected synthetic event does not prove the real user path still works.
+- 🟠 **A structural CAPTCHA signal must be challenge-owned.** A seller title and image alt can repeat the same CAPTCHA phrase and must not activate global backoff. Require a real captcha input or a captcha-action form containing its marker image; a standalone image marker is never enough.
+- 🟠 **Bound every ingress, not just scheduled work.** Background continuation budgets do not protect visible-tab extraction or dashboard bulk messages. Cap rows, fields, message items, and the durable collection while keeping the 784-item and whole-list selection regressions green.
+- 🟡 **Legacy URL cleanup belongs at every navigation sink.** Old stored HTTP Amazon links may predate strict fetch validation. Bind the URL to the stored ASIN, upgrade only a valid supported Amazon product path to HTTPS, and suppress everything else before popup/dashboard/notification navigation.
+- 🟡 **Remote HTML parsing must remain resource-inert.** Neutralize scripts, frames, links, styles, and fetch-capable attributes before parsing, use a restrictive offscreen CSP, and keep only allowlisted HTTPS Amazon image URLs. Unknown image hosts should lose the image rather than the tracked product.
+- 🟡 **Legacy Sync cleanup is a verified migration.** Write tracked items locally, read back and compare the durable copy, then remove the Sync key. Residual cleanup must be idempotent, including when the valid local collection is an empty array.
+
+---
+
+## 0G. Saved Signal UI, Accessibility & Wishlist Continuation (Codex, 2026-08-24)
+
+- 🟠 **Runtime accessibility state must follow visual state.** A static `aria-pressed="false"` or `aria-expanded="false"` in a template becomes misleading as soon as JavaScript toggles priority/history. Initialize attributes from item/application state and update them in the same branch that updates the visible control. Global history expansion is limited to 10 visible cards so the lazy-chart performance guarantee is not silently discarded.
+- 🟠 **Large import selection is a separate scale boundary.** Progressive rendering of the tracked-product list does not protect the wishlist selection view. The selection flow now mounts at most 50 products per page, stores selection in a model-level index set, and makes “Select All” operate across every extracted product. Do not infer selected products only from mounted checkboxes.
+- 🟡 **View changes require explicit focus transfer.** Wishlist selection and product details are hidden page regions, not visual-only overlays. Opening a region moves focus to its heading; closing it restores focus to the initiating control. Emoji-only buttons have accessible names, and chart canvases are paired with textual price/timestamp evidence.
+- 🟡 **Blocking dialogs hide recoverable context.** Dashboard validation, extraction, selection, and storage failures now use inline `status`/`alert` regions. Actionable errors persist, failed storage mutations restore controls, and user input remains available for correction. Do not reintroduce `alert()`, `prompt()`, or `confirm()` into extension UI flows.
+- 🟡 **Trust copy must match the storage boundary.** Tracked items and price history are local; only lightweight preferences may use Chrome sync. Export copy names the sensitive fields, clear-history copy says tracking continues, and scheduler copy avoids batch-size jargon.
+- 🟡 **Wishlist continuation must be both fast and deletion-safe.** A partial 8-page scheduled traversal now requests a one-shot continuation after about 60 seconds, self-heals after service-worker startup, and defers to CAPTCHA backoff. Never perform missing-item reconciliation until the traversal is complete.
+- 🟢 **Saved Signal is a utility, not a sales surface.** Popup, dashboard, options, and the in-page Track price control use a restrained navy/mint local asset system with accessible contrast, visible focus, disabled states, and reduced-motion behavior. Keep scripts/fonts/icons local and keep the popup height content-driven.
+
+---
+
 ## 0F. Repository Cleanup & Documentation (Antigravity, 2026-07-04)
 
 - 🟢 **Cleaned up root directory:** Removed scratch scripts (`test_*.js`, `*.har`, `*.html`) that cluttered the root. The actual test suite lives in `src/__tests__/`.
@@ -19,13 +46,13 @@ Severity legend: 🔴 critical (will break for real users / risk of ban) · 🟠
 
 AGY reported Phase 2 complete: "Chart.js vendored locally, trackedItems moved to local storage, mutex added to `saveTrackedItem`, CAPTCHA circuit-breaker added." Verified each claim against the code — two are solid, two need follow-up:
 
-- 🔴 **The `saveTrackedItem` mutex deadlocked on the first call (Claude, FIXED).** The implementation did `saveMutex = prevMutex.then(() => resolve)` inside `new Promise(resolve => …)`. The `.then` callback *returned* the `resolve` function instead of *calling* it, so the awaited promise never settled — the very first `saveTrackedItem` call hung forever (proven with a standalone repro). It was latent only because `saveTrackedItem` currently has **no callers** (background batch uses `saveTrackedItems`; content/popup write storage directly). **Fix:** rewrote it as a proper promise-chain mutex (`const run = saveMutex.then(work); saveMutex = run.catch(()=>{}); return run;`), verified with a concurrent-write harness (5 parallel writes → 5 persisted, no lost updates, no hang). **Lesson:** a promise-chain mutex must *invoke* the resolver in the `.then`, and the lock chain must swallow rejections so one failed write doesn't poison it. There is still no unit test for `storage.js` because of the ESM-vs-Jest gap (see §E2E) — add one when that's resolved.
+- 🔴 **The `saveTrackedItem` mutex deadlocked on the first call (Claude, FIXED).** The implementation did `saveMutex = prevMutex.then(() => resolve)` inside `new Promise(resolve => …)`. The `.then` callback *returned* the `resolve` function instead of *calling* it, so the awaited promise never settled. **Fix:** rewrote it as a proper promise-chain mutex (`const run = saveMutex.then(work); saveMutex = run.catch(()=>{}); return run;`). The same lock now backs `updateTrackedItems()`, which applies batch merges to the latest collection. **Lesson:** a promise-chain mutex must invoke its resolver, survive rejected work, and cover every read-modify-write path.
 
 - 🟠 **CAPTCHA circuit-breaker persistence (Codex, FIXED).** The Phase 2 breaker initially used only an in-memory service-worker flag, which resets after MV3 idle termination and provides no cross-run protection. `background.js` now persists `captchaBackoffUntil` and `captchaBackoffAttempts` in `chrome.storage.local`, skips alarms while backoff is active, and applies exponential backoff capped at 24 hours. Lesson: service-worker safety state must survive worker restarts.
 
 - 🟠 **Unused vendored Chart.js dead weight (Codex, FIXED).** AGY vendored Chart.js after Codex replaced popup charts with a local sparkline renderer, leaving `../utils/chart.js` loaded but unused. The popup no longer loads Chart.js and the vendored file was removed. Keep the sparkline unless the product requires richer interactive charting.
 
-- ✅ **`trackedItems` in `chrome.storage.local` + `unlimitedStorage` — confirmed correct.** Storage area moved to `local` with legacy-sync migration in `getTrackedItems()`, and `unlimitedStorage` was added to the manifest, which resolves the earlier 10 MB local-quota risk (§2). `content.js` now also reads/writes `chrome.storage.local` consistently. Minor open note: `content.js` writes the `trackedItems` array directly (not via the mutex), so a user adding an item mid-scrape could still be clobbered by the end-of-run `saveTrackedItems(items)` — low likelihood, but route content/popup writes through the serialized helpers if it ever bites.
+- ✅ **`trackedItems` in `chrome.storage.local` + `unlimitedStorage` — confirmed correct.** Storage area moved to `local` with legacy-sync migration in `getTrackedItems()`, and `unlimitedStorage` was added to the manifest, which resolves the earlier 10 MB local-quota risk (§2). Content and UI writes route through background/storage helpers; scheduled results are merged through `updateTrackedItems()`.
 
 ---
 
@@ -82,7 +109,7 @@ Full QA sweep after the dashboard/wishlist features landed: unit suite, Puppetee
 
 Verified green after fixes: 22/22 unit, 4/4 E2E (real Chrome, extension loaded), 14-point popup interaction matrix + failure path (`?fail=1`) + empty state in the harness, zero console errors.
 
-Known risks accepted (documented, not fixed): `BULK_ADD_TRACKED_ITEMS` does a read-modify-write outside the storage mutex (small window vs. popup writes; the scrape queue covers the alarm jobs); dashboard still uses `prompt()` for target edits (popup pattern is the inline editor — align when the dashboard gets UX attention); the `tabs` permission was added for wishlist-tab detection, widening the earlier "minimal permissions" stance — revisit if Web Store review pushes back.
+Resolved in the 2026-07-12 scale pass: bulk adds now use the tracked-items update lock, dashboard mutations are routed through the service worker, and target editing is inline. Remaining accepted risk: the `tabs` permission is required for wishlist-tab detection and may receive extra Web Store review scrutiny.
 
 ---
 
@@ -95,6 +122,20 @@ A user screenshot with 784 tracked items showed the popup collapsed to a sliver 
 - **Context-aware track offer** (user requirement — do not regress): the popup offers to track the current tab **only** when it's an untracked Amazon product ("Track This Product") or an untracked wishlist ("Import This Wishlist", deep-links to `dashboard.html?import=<url>`). Already-tracked products/wishlists show a passive "✓ Already tracking…" line; Amazon non-product pages get a hint; **non-Amazon pages get no tracking UI at all**. Harness scenarios: `?tab=product|product-tracked|wishlist|wishlist-tracked|amazon-home|other`.
 
 Verified: all six tab contexts in the harness, add-flow state transition, 22/22 unit, 4/4 E2E, zero console errors.
+
+---
+
+## 0F. Scale, Scheduling & Dashboard Safety (Codex, 2026-07-12)
+
+- 🔴 **Long scrape snapshots must not replace live user state (FIXED).** Alarm jobs previously wrote their entire pre-scrape `trackedItems` snapshot after network work completed, which could resurrect a removed item or overwrite a target/priority edit made during the scrape. All UI mutations now go through service-worker messages, giving tracked-item writes one serialized owner. Batch persistence uses `updateTrackedItems()` and merges only scraper-owned fields into the latest collection; explicit user fields remain authoritative and deletions are not resurrected.
+- 🔴 **Thirty sequential requests exceeded a safe MV3 event budget (FIXED).** A 30-item batch combined with 15-second timeouts and 2–5-second jitter could approach ten minutes. Standard batches now process at most 8 non-priority items per one-shot adaptive wake. Priority products are excluded from the standard queue so they are not fetched twice.
+- 🟠 **A safe batch can still produce an unusably slow fixed cycle (FIXED).** Eight products every five minutes made 780 products take about 8.1 hours. Balanced Adaptive now schedules the next standard batch 30 seconds after completion while due work remains, uses 1–2-second sequential jitter, and assigns per-product next-due tiers (10m near target, 15m volatile, 90m stable, 3h unavailable). Use one-shot alarms for continuous queues; recurring alarms create either idle gaps or overlapping work.
+- 🟠 **One-shot schedulers need self-healing (FIXED).** A fired one-shot alarm disappears before work begins. The alarm handler checks in `finally` that a successor exists, startup recreates missing or legacy recurring alarms, and CAPTCHA backoff schedules the next wake at the persisted resume time. Never rely on an in-memory timer or only the happy path to continue tracking.
+- 🟠 **Wishlist removals require source ownership and complete pagination (FIXED).** Imported items now carry `wishlistIds`; explicitly tracked products carry `trackedIndividually`. Auto-sync removes only a missing wishlist association and deletes the product only when no source remains. Partial or failed pagination results never trigger removals. Legacy records without source metadata are preserved.
+- 🟠 **Large dashboards must progressively render (FIXED).** Search/sort previously rebuilt all 784 cards and hidden chart metadata. The dashboard now renders 50 products at a time, provides focused filters, persists sort/filter preferences, and creates chart metadata/canvas pixels only when a visible chart opens.
+- 🟡 **Destructive actions and edits stay in context (FIXED).** Dashboard target editing now uses an inline form, product removal requires an expiring second click, and clearing all history uses the same two-step confirmation. Do not reintroduce `prompt()`/`confirm()` for routine extension UI.
+- 🟡 **Global numeric target prices are invalid across currencies (FIXED).** One setting cannot safely mean €5, £5, and $5. Target prices are per product; the global default was removed and legacy values are cleared from settings. Global percentage discounts remain currency-independent.
+- 🟡 **Retention labels must match deletion behavior (FIXED).** “Keep Price History: 30 Days” now deletes points older than 30 days. Downsampling old points forever is a different policy and must not be presented as retention.
 
 ---
 
@@ -114,7 +155,7 @@ Verified: all six tab contexts in the harness, add-flow state transition, 22/22 
 
 - 🔴 **CAPTCHA/rate-limit circuit-breaker back-off (Codex, FIXED).** When `scrapeAmazonProduct` returns `CAPTCHA_BLOCKED` or `RATE_LIMITED` (HTTP 429/503), `background.js` aborts the remaining run and persists exponential backoff in local storage.
 
-- 🟠 **Request volume for 500-item lists (Codex, MITIGATED).** Scraping now processes a small cursor-based slice (`ITEMS_PER_ALARM = 5`) every 15 minutes, one request at a time with per-request jitter. This avoids the old 500-requests/hour all-items run and keeps each service-worker wake short. Keep future changes cursor-based; do not reintroduce all-items hourly scraping.
+- 🟠 **Request volume for 500+ item lists (Codex, MITIGATED).** Standard scraping remains sequential and bounded to 8 products per wake, with persistent per-item due times and global CAPTCHA/rate-limit backoff. Increasing throughput must come from shorter gaps between bounded batches and adaptive prioritization, not hundreds of concurrent requests.
 
 - 🟠 **Fetch timeout (Codex, FIXED).** `scrapeAmazonProduct` now wraps Amazon fetches in an `AbortController` timeout (~15 s) and returns `FETCH_TIMEOUT` instead of letting a hung request block the whole batch indefinitely.
 
@@ -132,7 +173,7 @@ Verified: all six tab contexts in the harness, add-flow state transition, 22/22 
 
 - 🔴 **`trackedItems` in `chrome.storage.sync` (Codex, FIXED).** `sync` limits include `QUOTA_BYTES_PER_ITEM = 8192`, `QUOTA_BYTES = 102400`, and write-rate caps. The entire list was one key, so larger wishlists could exceed per-key limits and scheduled batch writes could hit quotas. The canonical item list now lives in `chrome.storage.local`, settings remain in sync, and `getTrackedItems()` migrates the legacy sync key on first local read.
 
-- 🔴 **Read-modify-write race in `saveTrackedItem` during batched scrapes (Codex, FIXED for scheduled batches).** `runPriceCheckBatch` used to process 3 items with `Promise.all`, and each successful scrape called `saveTrackedItem`, causing concurrent `getTrackedItems()` → mutate array → `setStorageData()` writes that could clobber each other and overwhelm sync write quotas. Scheduled scraping now mutates items in memory and persists `TRACKED_ITEMS` once per successful batch via `saveTrackedItems()`. Keep this pattern for future background jobs.
+- 🔴 **Read-modify-write race in batched scrapes (Codex, FIXED).** Scheduled scraping mutates a snapshot in memory, then uses `updateTrackedItems()` to merge scraper-owned fields into the latest collection. Never restore whole stale snapshots after network work; they can overwrite user edits or resurrect deletions.
 
 - 🟠 **MV3 service-worker lifetime vs. long scrape loops (Codex, FIXED).** The background worker now processes only a few items per alarm and persists `scrapeCursor` in local storage. This keeps each run short enough for MV3 and lets the next alarm resume from the next item.
 
@@ -176,6 +217,8 @@ Verified: all six tab contexts in the harness, add-flow state transition, 22/22 
 
 - 🟠 **Scheduled price batches must not be blocked by recent manual sync (Codex, FIXED).** The regular `checkPricesAlarm` path skipped any item checked in the last 12 hours, so after a manual wishlist sync all scheduled alarms could wake up and advance the cursor without fetching or recording chart history. The cursor and `ITEMS_PER_ALARM` limit already control request volume; do not add broad freshness skips that make visible "next check" times lie. Alarms are also self-healed on install, startup, and service-worker load.
 
+- 🟡 **Dashboard pagination must preserve scroll position (Antigravity, 2026-07-22, FIXED).** Clicking "Load more" in `dashboard.js` previously called `renderItems()`, which wiped out `itemList.innerHTML` and reset `#item-list` scroll position to 0, sending the user back to the beginning of the page. `renderItems()` now saves `itemList.scrollTop` and restores it via `requestAnimationFrame` on pagination/re-renders, while explicit filter/sort/search changes reset scroll to top.
+
 ## 4. Alerts & Business Logic (`background.js`)
 
 - 🟠 **First-run restock spam (Codex, FIXED).** Restock alerts now fire only on an explicit `false → true` transition. The first observation records `wasInStockPreviously` without notifying.
@@ -206,3 +249,9 @@ Current coverage: CAPTCHA (title + body), standard parse, US & EU thousands sepa
 - **Puppeteer with Jest CommonJS (Codex):** Keep Chrome extension E2E tests in [extension.e2e.test.js](../src/__tests__/extension.e2e.test.js). Use dynamic `import('puppeteer')` inside the Jest test and run it with `NODE_OPTIONS=--experimental-vm-modules` to avoid Puppeteer's ESM/CommonJS friction.
 - **Separate unit and browser tests (Codex):** `npm test` is intentionally unit-only and sandbox-friendly. Run `npm run test:e2e` for headless Chrome extension loading with `--disable-extensions-except` and `--load-extension`.
 - **Manifest assets are test prerequisites (Codex):** Keep every manifest-referenced icon checked in. Missing `assets/icon*.png` files prevented the MV3 service worker from appearing in Puppeteer and made the failure look like a test harness issue.
+# 2026-08-24: security controls must preserve authorized query-bearing extension flows
+
+- Comparing an extension sender URL as a raw string rejected the legitimate popup-to-dashboard `?import=` flow. Authorize the canonical extension origin and exact page path, then validate the message payload independently.
+- A complete remote snapshot is still stale by persistence time. Destructive wishlist reconciliation must re-evaluate current user-owned fields inside the serialized storage update; automatic remote reconciliation should not delete retained price history.
+- Wishlist-shaped rows prove parseability, not list identity. Only matching list identifiers or strong document-level canonical identity may authorize complete-state reconciliation.
+- A serialized tracked-item merge does not protect a separately stored history snapshot. Background checks now persist only the samples they appended through the shared storage mutex, so a delayed scrape cannot replace a newer manual-sync sample with an older whole-object snapshot.

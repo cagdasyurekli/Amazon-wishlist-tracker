@@ -6,6 +6,135 @@
 
 chrome.runtime.onMessage.addListener(handleMessages);
 
+const MAX_HTML_CHARS = 8 * 1024 * 1024;
+const MAX_WISHLIST_ROWS = 2500;
+const SAFE_IMAGE_HOSTS = new Set([
+  'm.media-amazon.com',
+  'images.amazon.com',
+  'ecx.images-amazon.com',
+  'images-na.ssl-images-amazon.com',
+  'images-eu.ssl-images-amazon.com',
+  'images-fe.ssl-images-amazon.com',
+  'images-cn.ssl-images-amazon.com',
+  'images-jp.amazon.com'
+]);
+const AMAZON_HOST_PATTERN = /(^|\.)amazon\.(com|nl|de|fr|es|it|co\.uk)$/i;
+
+function getAmazonWishlistId(value) {
+  try {
+    const parsed = new URL(value);
+    if (parsed.protocol !== 'https:' || parsed.username || parsed.password || parsed.port || !AMAZON_HOST_PATTERN.test(parsed.hostname)) {
+      return null;
+    }
+    return parsed.pathname.match(/\/(?:hz\/)?wishlist\/ls\/([a-z0-9_-]{1,64})(?:[/?#]|$)/i)?.[1] || null;
+  } catch (_error) {
+    return null;
+  }
+}
+
+function resolveAmazonWishlistPageUrl(value, baseUrl) {
+  try {
+    const parsed = new URL(value, baseUrl);
+    const expectedId = getAmazonWishlistId(baseUrl);
+    return expectedId && getAmazonWishlistId(parsed.href) === expectedId ? parsed : null;
+  } catch (_error) {
+    return null;
+  }
+}
+
+function sanitizeAmazonImageUrl(value, baseUrl) {
+  try {
+    const parsed = new URL(value, baseUrl);
+    if (
+      parsed.href.length > 2048 ||
+      parsed.protocol !== 'https:' ||
+      parsed.username ||
+      parsed.password ||
+      parsed.port ||
+      !SAFE_IMAGE_HOSTS.has(parsed.hostname.toLowerCase()) ||
+      !parsed.pathname.includes('/images/I/')
+    ) return '';
+    parsed.hash = '';
+    return parsed.href;
+  } catch (_error) {
+    return '';
+  }
+}
+
+function parseInertHtml(htmlString, baseUrl) {
+  if (typeof htmlString !== 'string' || htmlString.length > MAX_HTML_CHARS) {
+    throw new Error('HTML_TOO_LARGE');
+  }
+
+  // Template contents are parsed into an inert DocumentFragment. They are never
+  // attached to the offscreen page, so scripts, media, frames and images cannot
+  // become active. A restrictive page CSP in offscreen.html provides a second
+  // independent fail-closed control.
+  const template = document.createElement('template');
+  template.innerHTML = htmlString;
+  const root = template.content;
+
+  // Preserve only strong, document-level wishlist identity signals before
+  // removing metadata and resource-bearing elements. Ordinary anchors are not
+  // identity proof because seller or recommendation content can contain them.
+  const documentWishlistIds = [
+    ...root.querySelectorAll('link[rel~="canonical"][href], meta[property="og:url"][content]')
+  ].map((node) => getAmazonWishlistId(
+    node.getAttribute('href') || node.getAttribute('content') || ''
+  )).filter(Boolean);
+
+  root.querySelectorAll('img').forEach((image) => {
+    const rawSource = image.getAttribute('src') || image.getAttribute('data-src') || image.getAttribute('data-old-hires') || '';
+    const safeSource = sanitizeAmazonImageUrl(rawSource, baseUrl);
+    if (safeSource) image.dataset.safeImageUrl = safeSource;
+    if (/captcha|validatecaptcha/i.test(`${rawSource} ${image.getAttribute('alt') || ''}`)) {
+      image.dataset.captchaMarker = 'true';
+    }
+  });
+  root.querySelectorAll('form').forEach((form) => {
+    if (/validatecaptcha|captcha/i.test(form.getAttribute('action') || '')) {
+      form.dataset.captchaForm = 'true';
+    }
+  });
+
+  root.querySelectorAll('base, script, iframe, frame, object, embed, link, style, meta[http-equiv="refresh" i]').forEach((node) => node.remove());
+  const resourceAttributes = [
+    'src', 'srcset', 'poster', 'data', 'ping', 'background', 'action',
+    'formaction', 'xlink:href', 'style'
+  ];
+  root.querySelectorAll('*').forEach((node) => {
+    resourceAttributes.forEach((attribute) => node.removeAttribute(attribute));
+  });
+
+  return {
+    root,
+    title: (root.querySelector('title')?.textContent || '').trim(),
+    text: root.textContent || '',
+    documentWishlistIds
+  };
+}
+
+function isVerifiedCaptcha(parsed) {
+  const normalizedTitle = parsed.title.toLowerCase();
+  const normalizedText = parsed.text.toLowerCase();
+  const titleSignal = normalizedTitle === 'robot check' || normalizedTitle === 'captcha';
+  const phraseSignal =
+    normalizedText.includes('type the characters you see') ||
+    normalizedText.includes('enter the characters you see') ||
+    normalizedText.includes("we just need to make sure you're not a robot");
+  // A seller-controlled title and image alt can repeat the same words. Treat
+  // only a real challenge form/input (optionally with its marker image) as
+  // structural evidence; a standalone image is never authoritative.
+  const challengeInput = parsed.root.querySelector('input#captchacharacters, input[name="captchacharacters"]');
+  const challengeForm = parsed.root.querySelector('form[data-captcha-form="true"]');
+  const structuralSignal = Boolean(
+    challengeInput ||
+    (challengeForm && challengeForm.querySelector('img[data-captcha-marker="true"]'))
+  );
+
+  return structuralSignal && (titleSignal || phraseSignal);
+}
+
 function handleMessages(message, sender, sendResponse) {
   if (message.target !== 'offscreen') {
     return false;
@@ -104,20 +233,12 @@ function parseWishlistPriceDrop(text, currentPrice) {
 }
 
 function parseAmazonHtml(htmlString, url) {
-  const parser = new DOMParser();
-  const doc = parser.parseFromString(htmlString, 'text/html');
-
-  // Check for CAPTCHA / bot interstitials. Amazon does not always change the
-  // <title> (it can stay as the product name on some interstitials), so we also
-  // scan the body for the tell-tale challenge phrases.
-  const bodyText = (doc.body ? doc.body.textContent : '').toLowerCase();
-  const captchaInBody =
-    bodyText.includes('type the characters you see') ||
-    bodyText.includes('enter the characters you see') ||
-    bodyText.includes("we just need to make sure you're not a robot");
-  if (doc.title.includes('Robot Check') || doc.title.includes('Captcha') || captchaInBody) {
+  const parsed = parseInertHtml(htmlString, url);
+  const doc = parsed.root;
+  if (isVerifiedCaptcha(parsed)) {
     throw new Error('CAPTCHA_BLOCKED');
   }
+  const bodyText = parsed.text.toLowerCase();
 
   const data = {
     success: true,
@@ -243,22 +364,16 @@ function parseAmazonHtml(htmlString, url) {
 }
 
 function parseAmazonWishlist(htmlString, url) {
-  const parser = new DOMParser();
-  const doc = parser.parseFromString(htmlString, 'text/html');
-
-  // Check for CAPTCHA
-  const bodyText = (doc.body ? doc.body.textContent : '').toLowerCase();
-  const captchaInBody =
-    bodyText.includes('type the characters you see') ||
-    bodyText.includes('enter the characters you see') ||
-    bodyText.includes("we just need to make sure you're not a robot");
-  if (doc.title.includes('Robot Check') || doc.title.includes('Captcha') || captchaInBody) {
+  const parsed = parseInertHtml(htmlString, url);
+  const doc = parsed.root;
+  if (isVerifiedCaptcha(parsed)) {
     throw new Error('CAPTCHA_BLOCKED');
   }
 
   const items = [];
   // Amazon wishlists typically use li with data-itemid
   const itemElements = doc.querySelectorAll('li[data-itemid]');
+  if (itemElements.length > MAX_WISHLIST_ROWS) throw new Error('WISHLIST_PAGE_TOO_LARGE');
   
   for (const el of itemElements) {
     // Look for link containing ASIN
@@ -346,9 +461,9 @@ function parseAmazonWishlist(htmlString, url) {
 
     // Extract product image
     let imageUrl = '';
-    const imgEl = el.querySelector('img[src*="images/I/"]');
+    const imgEl = el.querySelector('img[data-safe-image-url]');
     if (imgEl) {
-      imageUrl = imgEl.src;
+      imageUrl = imgEl.dataset.safeImageUrl;
     }
 
     const isPurchased = itemText.includes('purchased') || itemText.includes('gekocht') || itemText.includes('you own this item');
@@ -389,18 +504,50 @@ function parseAmazonWishlist(htmlString, url) {
   }
 
   if (nextHref) {
-    if (nextHref.startsWith('/')) {
-      const urlObj = new URL(url);
-      nextPageUrl = `${urlObj.origin}${nextHref}`;
-    } else {
-      nextPageUrl = nextHref;
-    }
+    const resolved = resolveAmazonWishlistPageUrl(nextHref, url);
+    if (!resolved) throw new Error('INVALID_AMAZON_URL');
+    nextPageUrl = resolved.href;
   }
 
-  return { items, nextPageUrl };
+  const requestedWishlistId = getAmazonWishlistId(url);
+  const declaredWishlistIds = Array.from(doc.querySelectorAll(
+    '[data-list-id], [data-listid], input[name="listId"], input#listId'
+  )).map((node) => (
+    node.getAttribute('data-list-id') ||
+    node.getAttribute('data-listid') ||
+    node.getAttribute('value') ||
+    ''
+  )).filter(Boolean).concat(parsed.documentWishlistIds || []);
+  if (declaredWishlistIds.some((id) => id !== requestedWishlistId)) {
+    throw new Error('WISHLIST_ID_MISMATCH');
+  }
+
+  const hasMatchingIdentity = declaredWishlistIds.includes(requestedWishlistId);
+  const hasWishlistContainer = Boolean(doc.querySelector(
+    '#g-items, #wishlist-page, #wl-item-view, [data-testid="wishlist-container"]'
+  ));
+  const hasExplicitEmptyState = Boolean(doc.querySelector(
+    '#empty-list, .a-box .wl-empty-list, [data-testid="wishlist-empty"]'
+  ));
+  const hasValidatedRows = itemElements.length > 0 && items.length > 0 && hasMatchingIdentity;
+  const hasValidatedEmptyPage = itemElements.length === 0 && hasMatchingIdentity && (hasWishlistContainer || hasExplicitEmptyState);
+  const structurallyValidated = Boolean(requestedWishlistId && (hasValidatedRows || hasValidatedEmptyPage));
+
+  return {
+    items,
+    nextPageUrl,
+    completeness: structurallyValidated ? (nextPageUrl ? 'partial' : 'validated') : 'indeterminate'
+  };
 }
 
 // Export for Jest testing in Node environment
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { parseAmazonHtml, parsePrice, parseAmazonWishlist, parseWishlistPriceDrop };
+  module.exports = {
+    isVerifiedCaptcha,
+    parseAmazonHtml,
+    parseInertHtml,
+    parsePrice,
+    parseAmazonWishlist,
+    parseWishlistPriceDrop
+  };
 }

@@ -8,13 +8,19 @@
 <body>
   <div class="app-container">
     <header class="app-header">
-      <div class="header-title">
-        <h1>Tracked Items</h1>
-        <span id="item-count" class="count-badge" hidden>0</span>
+      <div class="brand-block">
+        <img class="brand-mark" src="../../assets/icon48.png" alt="">
+        <div>
+          <p class="brand-name">Saved Signal</p>
+          <div class="header-title">
+            <h1>Tracked Items</h1>
+            <span id="item-count" class="count-badge" hidden aria-label="0 tracked items">0</span>
+          </div>
+        </div>
       </div>
       <div class="header-actions">
-        <button id="dashboard-btn" class="icon-btn" type="button" title="Open dashboard" aria-label="Open dashboard">📊</button>
-        <button id="options-btn" class="icon-btn" type="button" title="Settings" aria-label="Open settings">⚙️</button>
+        <button id="dashboard-btn" class="icon-btn" type="button" title="Open dashboard" aria-label="Open dashboard"><span aria-hidden="true">↗</span></button>
+        <button id="options-btn" class="icon-btn" type="button" title="Settings" aria-label="Open settings"><span aria-hidden="true">⚙</span></button>
       </div>
     </header>
 
@@ -31,14 +37,14 @@
       </section>
 
       <section id="recent-section" hidden>
-        <h2 class="section-label">Recently updated</h2>
+        <h2 class="section-label">Highlights</h2>
         <ul id="recent-list" class="recent-list"></ul>
       </section>
 
       <div class="empty-state" id="empty-state" hidden>
         <p class="empty-icon" aria-hidden="true">🛒</p>
         <p class="empty-title">No tracked items yet</p>
-        <p>Open an Amazon product page and click “👀&nbsp;Track&nbsp;Price”.</p>
+        <p>Open an Amazon product page and click “Track price”.</p>
       </div>
 
       <button id="open-dashboard-btn" class="secondary-btn" type="button">Open Dashboard</button>

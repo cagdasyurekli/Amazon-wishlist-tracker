@@ -3,30 +3,79 @@
  * Handles adding "Track Price" buttons and injecting Keepa-style mini charts.
  */
 
-// Inject a "Track Price" button near the Amazon Buy Box
+const TRACK_CONTROL_ID = 'amz-tracker-control';
+const ASIN_PATTERN = /^[A-Z0-9]{10}$/;
+const PRODUCT_PATH_PATTERN = /\/(?:dp|gp\/product)\/([A-Z0-9]{10})(?:[/?]|$)/i;
+const MAX_VISIBLE_WISHLIST_ROWS = 2000;
+const MAX_WISHLIST_TITLE_LENGTH = 300;
+let trackButton = null;
+
+const TRACK_BUTTON_STYLES = `
+  :host { display: block; width: 100%; }
+  button {
+    box-sizing: border-box;
+    width: 100%;
+    margin: 10px 0;
+    padding: 10px 14px;
+    border: 2px solid #13c6a3;
+    border-radius: 8px;
+    background: #152238;
+    color: #f7fafc;
+    box-shadow: 0 2px 6px rgba(21, 34, 56, 0.2);
+    cursor: pointer;
+    font-family: Arial, sans-serif;
+    font-size: 14px;
+    font-weight: 700;
+    line-height: 1.25;
+    transition: background-color 0.2s, border-color 0.2s, transform 0.1s;
+  }
+  button:hover { background-color: #203653; border-color: #42d8ba; }
+  button:active { transform: scale(0.98); }
+  button:focus-visible { outline: 3px solid #13c6a3; outline-offset: 2px; }
+  button:disabled {
+    border-color: #8aa39e;
+    background: #334155;
+    color: #f7fafc;
+    cursor: default;
+    opacity: 1;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    button { transition: none; }
+  }
+`;
+
+function extractAsinFromUrl(rawUrl) {
+  try {
+    const url = new URL(rawUrl);
+    const match = url.pathname.match(PRODUCT_PATH_PATTERN);
+    const asin = match ? match[1].toUpperCase() : null;
+    return asin && ASIN_PATTERN.test(asin) ? asin : null;
+  } catch {
+    return null;
+  }
+}
+
+// Inject a "Track Price" button near the Amazon Buy Box. The closed shadow
+// root keeps private tracked/not-tracked state out of Amazon's shared DOM.
 function injectTrackButton() {
   const buyBox = document.querySelector('#buybox') || document.querySelector('#desktop_buybox');
-  if (!buyBox || document.getElementById('amz-tracker-btn')) return;
+  if (!buyBox || document.getElementById(TRACK_CONTROL_ID)) return;
 
+  const host = document.createElement('span');
+  host.id = TRACK_CONTROL_ID;
+  const shadow = host.attachShadow({ mode: 'closed' });
+  const style = document.createElement('style');
+  style.textContent = TRACK_BUTTON_STYLES;
   const btn = document.createElement('button');
-  btn.id = 'amz-tracker-btn';
-  btn.textContent = '👀 Track Price';
-  btn.style.cssText = `
-    width: 100%;
-    margin-top: 10px;
-    margin-bottom: 10px;
-    padding: 10px;
-    background-color: #ff9900;
-    color: white;
-    border: 1px solid #e38800;
-    border-radius: 8px;
-    cursor: pointer;
-    font-weight: bold;
-    font-size: 14px;
-    box-shadow: 0 2px 5px rgba(0,0,0,0.1);
-  `;
+  btn.type = 'button';
+  btn.textContent = 'Track price';
+  btn.setAttribute('aria-live', 'polite');
+  trackButton = btn;
 
   btn.addEventListener('click', async (e) => {
+    // Shared-DOM events are attacker-controlled. Only a real, currently active
+    // browser user gesture can authorize persistent tracking from this surface.
+    if (!e.isTrusted || navigator.userActivation?.isActive !== true) return;
     e.preventDefault();
     btn.disabled = true;
     btn.textContent = 'Adding…';
@@ -34,15 +83,15 @@ function injectTrackButton() {
     applyButtonState(btn, result);
   });
 
-  buyBox.prepend(btn);
+  shadow.append(style, btn);
+  buyBox.prepend(host);
 
   // Check if already tracked
-  const asinMatch = window.location.href.match(/\/(?:dp|gp\/product)\/([A-Z0-9]{10})/i);
-  const asin = asinMatch ? asinMatch[1] : null;
+  const asin = extractAsinFromUrl(window.location.href);
   if (asin) {
     chrome.runtime.sendMessage({ type: 'CHECK_IF_TRACKED', asin }, (response) => {
       if (response && response.isTracked) {
-        btn.textContent = '✅ Tracking Price';
+        btn.textContent = 'Tracking price';
         btn.disabled = true;
       }
     });
@@ -53,13 +102,15 @@ function injectTrackButton() {
 function applyButtonState(btn, result) {
   if (!btn) return;
   if (result && result.success) {
-    btn.textContent = '✅ Tracking Price';
+    btn.textContent = 'Tracking price';
+    btn.disabled = true;
   } else if (result && result.exists) {
-    btn.textContent = '✅ Tracking Price';
+    btn.textContent = 'Tracking price';
+    btn.disabled = true;
   } else {
     // Surface failures instead of leaving the button stuck on "Adding…".
     btn.disabled = false;
-    btn.textContent = '⚠️ Try Again';
+    btn.textContent = 'Try again';
   }
 }
 
@@ -71,9 +122,12 @@ function extractAndTrackProduct() {
   const titleEl = document.querySelector('#productTitle');
   const title = titleEl ? titleEl.textContent.trim() : document.title;
 
-  // Extract ASIN from URL (simple regex)
-  const asinMatch = window.location.href.match(/\/dp\/([A-Z0-9]{10})/i) || window.location.href.match(/\/gp\/product\/([A-Z0-9]{10})/i);
-  const asin = asinMatch ? asinMatch[1] : `ID-${Date.now()}`;
+  // Product identity is security-sensitive: never invent an ID when the page
+  // URL does not contain a canonical ten-character ASIN.
+  const asin = extractAsinFromUrl(window.location.href);
+  if (!asin) {
+    return Promise.resolve({ error: 'A valid Amazon product identifier is required.' });
+  }
 
   // Find current price visually (fallback, scraper.js does the real job)
   let currentPrice = null;
@@ -163,7 +217,8 @@ function parseWishlistPriceDrop(text, currentPrice) {
 }
 
 function extractWishlistItemsFromPage() {
-  const rows = Array.from(document.querySelectorAll('li[data-itemid], div[data-itemid]'));
+  const rows = Array.from(document.querySelectorAll('li[data-itemid], div[data-itemid]'))
+    .slice(0, MAX_VISIBLE_WISHLIST_ROWS);
   const items = [];
   const pageOrigin = window.location.origin;
 
@@ -175,7 +230,7 @@ function extractWishlistItemsFromPage() {
     if (!asin || items.some(item => item.id === asin)) return;
 
     const titleEl = row.querySelector('[id^="itemName_"], h2 a, a[href*="/dp/"]');
-    const title = (titleEl?.textContent || '').trim();
+    const title = (titleEl?.textContent || '').replace(/\s+/g, ' ').trim().slice(0, MAX_WISHLIST_TITLE_LENGTH);
     if (!title) return;
 
     let currentPrice = null;
@@ -232,7 +287,7 @@ function extractWishlistItemsFromPage() {
 
     items.push({
       id: asin,
-      wishlistItemId: row.getAttribute('data-itemid') || null,
+      wishlistItemId: (row.getAttribute('data-itemid') || '').slice(0, 128) || null,
       title,
       url: `${pageOrigin}/dp/${asin}`,
       imageUrl: row.querySelector('img[src*="images/I/"]')?.src || '',
@@ -241,8 +296,8 @@ function extractWishlistItemsFromPage() {
       wishlistPriceDropPercent,
       wishlistPriceWhenAdded,
       wishlistPriceDropAmount,
-      wishlistPriceDropText,
-      currency,
+      wishlistPriceDropText: wishlistPriceDropText?.slice(0, 500) || null,
+      currency: currency?.slice(0, 8) || null,
       inStock: !unavailable,
       addedAt: Date.now()
     });
@@ -257,14 +312,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'TRACK_CURRENT_PAGE') {
     (async () => {
       const result = await extractAndTrackProduct();
-      applyButtonState(document.getElementById('amz-tracker-btn'), result);
+      applyButtonState(trackButton, result);
       sendResponse(result);
     })();
     return true; // async response
   }
 
   if (message.type === 'EXTRACT_VISIBLE_WISHLIST') {
-    sendResponse({ success: true, items: extractWishlistItemsFromPage() });
+    const items = extractWishlistItemsFromPage();
+    sendResponse({ success: true, items, limited: items.length >= MAX_VISIBLE_WISHLIST_ROWS });
     return true;
   }
 });
@@ -274,10 +330,10 @@ injectTrackButton();
 
 // Amazon renders the buy box asynchronously, so a one-shot injection on load
 // frequently misses it. Watch the DOM until the button is placed, then stop.
-if (!document.getElementById('amz-tracker-btn')) {
+if (!document.getElementById(TRACK_CONTROL_ID)) {
   const observer = new MutationObserver(() => {
     injectTrackButton();
-    if (document.getElementById('amz-tracker-btn')) {
+    if (document.getElementById(TRACK_CONTROL_ID)) {
       observer.disconnect();
     }
   });

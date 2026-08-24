@@ -1,7 +1,7 @@
 # Amazon Wishlist Tracker — Feature Specifications
 
 > **Source of Truth for Expected Behavior**
-> Last Updated: 2026-07-12
+> Last Updated: 2026-08-24
 
 This document defines the expected behavior of all features in the Amazon Wishlist Tracker extension. It serves as the single source of truth for QA, testing, and AI Agents to verify functionality.
 
@@ -9,7 +9,7 @@ This document defines the expected behavior of all features in the Amazon Wishli
 
 ## 1. Tracking & Scraping
 ### 1.1 Individual Product Tracking
-- **Injection:** A "👀 Track Price" button is automatically injected onto supported Amazon product pages near the Buy Box.
+- **Injection:** A "Track price" control is automatically injected onto supported Amazon product pages near the Buy Box inside a closed Shadow DOM. Only a genuine user activation on a matching HTTPS product page can add the item.
 - **Current Tab Tracking:** Users can track the current Amazon product tab directly from the extension popup.
 - **Validation:** The extension must validate that the URL matches an allowed Amazon regional domain (`.com`, `.nl`, `.de`, `.fr`, `.es`, `.it`, `.co.uk`).
 - **Data Extracted:** The extension extracts the product ID (ASIN), title, current price, original price (if available), currency symbol, stock status, and product image.
@@ -17,14 +17,23 @@ This document defines the expected behavior of all features in the Amazon Wishli
 ### 1.2 Wishlist Tracking & Syncing
 - **Import Flow:** Users can import a public/shared Amazon wishlist URL via the Dashboard or the Popup.
 - **Data Extracted:** Extracts all visible items from the wishlist, including native Amazon price-drop data (`wishlistPriceDropPercent`, `wishlistPriceWhenAdded`, `wishlistPriceDropAmount`, `wishlistPriceDropText`).
-- **Auto-Sync:** Wishlists can be marked for "Auto-Sync," allowing the extension to periodically re-scrape the wishlist URL to pick up newly added or removed items.
+- **Keep List in Sync:** Wishlists can periodically add newly discovered products and stop tracking products removed from that wishlist. Products also tracked individually or through another wishlist are preserved.
+- **Reconciliation Identity:** Destructive reconciliation requires a complete page bound to the requested wishlist by a matching list identifier or canonical document identity. Identity-less rows may be shown for non-destructive extraction but cannot authorize removals.
+- **Concurrent Intent:** Final reconciliation rechecks the latest individual-tracking and multi-wishlist ownership state, so concurrent individual tracking or ownership by another wishlist is preserved. Background checks merge only their newly observed price samples into the latest local history instead of replacing concurrent samples, and automatic wishlist removal does not erase retained history.
+- **Fast Safe Continuation:** A scheduled wishlist traversal reads at most 8 pages per worker wake. If more pages remain, a one-shot continuation resumes after about 60 seconds instead of waiting for the next 15-minute rotation. The rotating cursor advances between chunks so one large list cannot starve another. Continuations survive service-worker restarts, respect CAPTCHA backoff, and never reconcile removals until the full traversal completes.
+- **Traversal Budgets:** A traversal is capped at 150 pages, 2,000 unique items, 32 MiB of HTML, six hours of resumable lifetime, and 12 MiB of persisted continuation state. Reaching a limit discards only the partial operational checkpoint; it never deletes tracked products or history.
+- **Manual Import Bounds:** Visible-tab extraction and dashboard bulk import accept at most 2,000 bounded products in one operation, while the durable tracked collection is capped at 5,000. The existing 50-item selection pages and whole-list “Select All” behavior remain available for ordinary large lists, including the 784-item regression fixture.
 
 ### 1.3 Background Scraping Lifecycle
-- **Normal Checking:** The extension runs a background job (`checkPricesAlarm`) every 5 minutes. It processes a small batch (cursor-based, max 30 items) of standard tracked items to avoid rate limits.
-- **Priority Checking:** Items marked as "Priority" are checked more frequently via `checkPriorityPricesAlarm` (every 5 minutes, up to 5 items per batch).
-- **Wishlist Checking:** Wishlist URLs are re-scraped every 15 minutes (`checkWishlistsAlarm`) to find new items and update prices.
-- **Offscreen Document:** All scraping uses a hidden Chrome offscreen document to safely parse the Amazon HTML using native DOM APIs without triggering XSS risks.
-- **Anti-Bot Backoff:** If Amazon returns a CAPTCHA or HTTP 429/503 Rate Limit, the extension triggers an exponential backoff circuit breaker (up to 24 hours) and pauses all scraping.
+- **Normal Checking:** Balanced Adaptive uses a one-shot `checkPricesAlarm`. It processes up to 8 due non-priority products sequentially, waits 1–2 seconds between requests, then schedules the next batch after at least 30 seconds. Unchecked products are immediately due.
+- **Adaptive Tiers:** Products near a price/discount target are due after 10 minutes, recently volatile products after 15 minutes, stable products after 90 minutes, and unavailable products after 3 hours. Ordinary failures retry after 15 minutes. The dashboard shows each product's next check and cadence reason.
+- **Priority Checking:** Priority items use a separate two-minute alarm and process up to 5 products per batch. They are excluded from standard batches.
+- **Wishlist Checking:** One tracked wishlist is selected by a rotating cursor every 15 minutes (`checkWishlistsAlarm`). Background pagination is resumable and processes at most 8 pages per wake. Removals are reconciled only after a complete traversal; partial results never delete missing products.
+- **Offscreen Document:** All scraping uses a hidden Chrome offscreen document to parse bounded Amazon HTML in an inert template. Remote scripts, frames, styles, and resource-loading attributes are neutralized; only allowlisted HTTPS Amazon image CDN URLs may reach the UI.
+- **Network Bounds:** Product and wishlist requests accept only supported HTTPS Amazon URLs and same-identity redirects. HTML content type, 8 MiB per-response size, cumulative wishlist size, and end-to-end time are enforced through body parsing.
+- **Navigation Safety:** Stored legacy Amazon product links are validated against their ASIN and upgraded from HTTP to canonical HTTPS before popup, dashboard, or notification navigation. Malformed, credentialed, lookalike, port-bearing, and identity-mismatched links are not opened.
+- **Anti-Bot Backoff:** If Amazon returns a structurally verified CAPTCHA or HTTP 429/503 Rate Limit, the extension triggers an exponential backoff circuit breaker (up to 24 hours) and pauses all scraping. Freeform words alone do not activate the breaker.
+- **Recovery:** The standard alarm is one-shot and recreated after each batch. Startup checks and an alarm-handler `finally` block restore it if Chrome terminates a worker or a batch fails unexpectedly.
 
 ---
 
@@ -41,8 +50,8 @@ This document defines the expected behavior of all features in the Amazon Wishli
 - **Behavior:** Fires when an item transitions strictly from "Out of Stock" to "In Stock".
 - **Anti-Spam:** Does not fire on the very first scrape of a newly tracked item, even if it is currently in stock.
 
-### 2.4 Purchased Item Alerts
-- **Behavior:** If an imported wishlist item is detected as "Purchased", the extension sends an alert, removes its price history, and stops tracking it.
+### 2.4 Purchased Text Safety
+- **Behavior:** Amazon-derived "purchased" text is advisory and untrusted. It must never automatically remove a tracked product, delete price history, or send a destructive-state notification.
 
 ### 2.5 Extension Icon Badge
 - **Behavior:** A red numerical badge on the extension icon displays the total number of tracked items that currently meet their discount or target price conditions.
@@ -55,28 +64,38 @@ This document defines the expected behavior of all features in the Amazon Wishli
 - **Purpose:** Fast interactions and status checks.
 - **Features:** 
   - Shows context-aware tracking buttons (e.g., "Track This Product" if on an untracked Amazon page).
-  - Displays the 3 most recently updated items with mini sparkline price charts.
-  - Sparklines are damped (flat line if price variance is <1%) and color-coded (green for drops, red for rises).
+  - Displays 3 compact highlights, prioritizing meaningful price drops and then recently updated products.
+  - Shows current price and a green drop/red rise badge when the change from the first recorded price is at least 0.5%.
+  - Uses the Saved Signal navy/mint visual system on a neutral soft-slate canvas with accessible contrast, visible keyboard focus, and reduced-motion support. Popup height remains content-driven.
+  - Opening wishlist import from the popup passes the supported `?import=` dashboard URL; the background authorizes that exact dashboard path with or without its query while rejecting other extension pages.
 
 ### 3.2 Dashboard (`dashboard.html`)
 - **Purpose:** Full data management and detailed analysis.
 - **Features:**
   - Displays all tracked items in a grid/list.
-  - Allows sorting (e.g., by Biggest Drop, Recently Added) and text searching.
+  - Allows persistent sorting, text searching, and filters for price drops, priority, stock, reached targets, and unchecked products.
+  - Progressively renders 50 products at a time with "Load More" pagination that preserves scroll position. Chart metadata and canvases are created only when charts are opened.
+  - Wishlist selection shows at most 50 products per page while preserving selection across pages. “Select All” applies to the complete extracted wishlist, not only the visible page.
   - Detailed product cards show explicit price histories, timestamps of previous scrapes, and native wishlist price-drop text.
+  - Target prices use an inline editor. Removal requires a second confirmation click that expires automatically.
   - "Sync Wishlist Now" button to manually trigger a batch update for a specific wishlist.
+  - Blocking browser dialogs are not used. Validation, progress, failures, and mutation results appear in accessible inline status regions; actionable errors persist until the user takes another action.
+  - Priority and history controls expose their live state through `aria-pressed` and `aria-expanded`. Moving into or out of wishlist selection and product details transfers and restores keyboard focus.
+  - At high browser zoom or short viewport heights, the dashboard switches to document scrolling so toolbar controls, product actions, and wishlist import remain reachable without horizontal overflow.
+  - Scheduler copy uses user language. A pending 60-second wishlist continuation is shown as the next wishlist sync when it occurs.
 
 ### 3.3 Options Page (`options.html`)
 - **Purpose:** Global settings and data export.
 - **Features:**
-  - Configure global defaults: `Default Discount Alert (%)` and `Default Target Price`.
-  - Configurable price history retention (e.g., 90 Days).
+  - Configure the global `Default Discount Alert (%)`. Target prices are configured per product to avoid applying one numeric value across different currencies.
+  - Configurable strict price-history retention (30 days, 90 days, 1 year, or forever). Expired points are deleted.
   - Export all raw tracking data to JSON.
   - Clear all price history.
+  - Explain that tracked items and price history stay on the device, lightweight preferences may use Chrome sync, exports contain product URLs/prices/history, and clearing history does not stop tracking.
 
 ---
 
 ## 4. Privacy & Data Storage
 - **Local-Only:** All tracking data (`TRACKED_ITEMS`, `PRICE_HISTORY`) is saved strictly in `chrome.storage.local`.
 - **No Cloud:** There is no external backend, no analytics tracking, and no data leaves the user's browser except for direct requests to Amazon domains.
-- **Sync Storage:** Lightweight global preferences (like dashboard sort order and default alert thresholds) are stored in `chrome.storage.sync` to persist across the user's browser instances.
+- **Sync Storage:** Lightweight global preferences (dashboard sort/filter and default discount threshold) are stored in `chrome.storage.sync` to persist across the user's browser instances.
