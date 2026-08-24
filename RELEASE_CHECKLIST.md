@@ -35,7 +35,7 @@ Automated evidence covers the large-list, narrow-width, 200% zoom, accessible-na
 ## Public repository and store readiness
 
 - [x] Obtain separate authorization before changing repository visibility, pushing, tagging, or publishing a release.
-- [ ] After a public-visibility change, read back repository visibility, default branch, license, private vulnerability reporting, and the public privacy/support URLs.
+- [x] After a public-visibility change, read back repository visibility, default branch, license, private vulnerability reporting, and the public privacy/support URLs.
 - [ ] Create and review the required store screenshots and any optional promotional artwork listed in `CHROMEWEBSTORE.md`.
 - [ ] Replace every store contact/support/privacy/homepage placeholder with a verified public value.
 - [ ] Review Chrome Web Store permission and data-use disclosures against the final manifest and `PRIVACY.md` before submission.

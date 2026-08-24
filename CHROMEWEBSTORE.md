@@ -131,4 +131,4 @@ Use the public repository URL after readback verification.
 | Version | Date | Changes | Status |
 |---------|------|---------|--------|
 | 1.0.0 | 2026-07-04 | Initial release | Released |
-| 1.1.0 | 2026-08-24 | Adaptive sync, scale, UI, logo, privacy and security hardening | Local release candidate; not yet published |
+| 1.1.0 | 2026-08-24 | Adaptive sync, scale, UI, logo, privacy and security hardening | GitHub source public; Chrome Web Store not submitted |
