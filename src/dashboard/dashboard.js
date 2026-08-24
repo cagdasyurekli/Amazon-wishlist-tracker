@@ -19,6 +19,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   const statusBanner = document.getElementById('status-banner');
   const itemSearchInput = document.getElementById('item-search-input');
   const nextChecksSummary = document.getElementById('next-checks-summary');
+  const legacyTargetWarning = document.getElementById('legacy-target-warning');
+  const legacyTargetOpenOptionsBtn = document.getElementById('legacy-target-open-options-btn');
 
   let statusTimer = null;
   function sendBackgroundMessage(message) {
@@ -206,6 +208,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   optionsBtn.addEventListener('click', () => {
     chrome.runtime.openOptionsPage();
   });
+  legacyTargetOpenOptionsBtn?.addEventListener('click', () => {
+    chrome.runtime.openOptionsPage();
+  });
 
   const sortSelect = document.getElementById('sort-select');
   const filterSelect = document.getElementById('filter-select');
@@ -214,6 +219,21 @@ document.addEventListener('DOMContentLoaded', async () => {
   
   // Load settings
   let settings = await getStorageData(StorageKeys.SETTINGS, StorageArea.SYNC) || {};
+  if (legacyTargetWarning) {
+    legacyTargetWarning.hidden = !Object.hasOwn(settings, 'defaultTargetPrice');
+  }
+  chrome.storage.onChanged.addListener((changes, areaName) => {
+    if (areaName !== StorageArea.SYNC || !changes[StorageKeys.SETTINGS]) return;
+    settings = changes[StorageKeys.SETTINGS].newValue || {};
+    if (legacyTargetWarning) {
+      legacyTargetWarning.hidden = !Object.hasOwn(settings, 'defaultTargetPrice');
+    }
+  });
+  async function saveDashboardPreference(key, value) {
+    const latestSettings = await getStorageData(StorageKeys.SETTINGS, StorageArea.SYNC) || {};
+    settings = { ...latestSettings, [key]: value };
+    await setStorageData(StorageKeys.SETTINGS, settings, StorageArea.SYNC);
+  }
   if (sortSelect && settings.dashboardSort) {
     const savedSortExists = Array.from(sortSelect.options).some(option => option.value === settings.dashboardSort);
     if (savedSortExists) {
@@ -707,11 +727,14 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   if (sortSelect) {
     sortSelect.addEventListener('change', async () => {
-      settings.dashboardSort = sortSelect.value;
       visibleItemLimit = PAGE_SIZE;
       if (itemList) itemList.scrollTop = 0;
       renderItems();
-      await setStorageData(StorageKeys.SETTINGS, settings, StorageArea.SYNC);
+      try {
+        await saveDashboardPreference('dashboardSort', sortSelect.value);
+      } catch (_error) {
+        showStatus('Could not save the sorting preference.', 'error');
+      }
     });
   }
   if (itemSearchInput) {
@@ -723,11 +746,14 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
   if (filterSelect) {
     filterSelect.addEventListener('change', async () => {
-      settings.dashboardFilter = filterSelect.value;
       visibleItemLimit = PAGE_SIZE;
       if (itemList) itemList.scrollTop = 0;
       renderItems();
-      await setStorageData(StorageKeys.SETTINGS, settings, StorageArea.SYNC);
+      try {
+        await saveDashboardPreference('dashboardFilter', filterSelect.value);
+      } catch (_error) {
+        showStatus('Could not save the filter preference.', 'error');
+      }
     });
   }
 

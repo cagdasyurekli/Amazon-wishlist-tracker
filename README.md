@@ -42,6 +42,7 @@ npm ci
 npm test -- --runInBand
 npm run test:scraper-contract
 npm run test:e2e
+npm run visual:qa
 ```
 
 Before preparing a public release candidate, run:
@@ -51,7 +52,7 @@ npm run audit:deps
 npm run release:check
 ```
 
-`release:check` audits dependencies, validates manifest references, icon dimensions/transparency, package/manifest/lockfile version parity, production dependency absence, local extension assets, unit tests, scraper continuation contracts, Chrome E2E tests, and `git diff --check` when executed in a Git worktree. The dependency-audit step requires current registry access.
+`release:check` audits dependencies, validates manifest references, icon dimensions/transparency, package/manifest/lockfile version parity, production dependency absence, local extension assets, unit tests, scraper continuation contracts, Chrome E2E tests, a synthetic five-screenshot visual pass, and `git diff --check` when executed in a Git worktree. The dependency-audit step requires current registry access.
 
 ## Architecture
 
@@ -71,5 +72,6 @@ npm run release:check
 - Stable-candidate acceptance: [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md)
 - Contributions and local verification: [CONTRIBUTING.md](CONTRIBUTING.md)
 - Chrome Web Store preparation checklist: [CHROMEWEBSTORE.md](CHROMEWEBSTORE.md)
+- Installation, usage, migration, and troubleshooting: [docs/USER_MANUAL.md](docs/USER_MANUAL.md)
 
 Amazon and the Amazon logo are trademarks of Amazon.com, Inc. or its affiliates. This independent project is not affiliated with or endorsed by Amazon.

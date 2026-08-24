@@ -13,13 +13,15 @@ All notable changes to this project are documented here. Versions follow semanti
 - Public security, privacy, contribution, and release-validation documentation.
 - Saved Signal logo and a cohesive navy/mint interface across the popup, dashboard, options, and in-page control.
 - Dedicated security regression coverage for network parsing, storage migration, user intent, and bounded wishlist continuation.
+- Explicit legacy-target review with one-time notification, persistent Dashboard warning, and latest-state single-currency migration.
+- A reproducible synthetic visual-QA command covering popup, dashboard, settings, and resolved migration states.
 
 ### Changed
 
 - Priority checking uses a separate two-minute queue.
 - Wishlist sync reconciles removals only after a complete traversal and preserves products owned by another source.
 - Popup highlights prioritize meaningful price changes while the dashboard owns full-list analysis.
-- Global numeric target prices were removed because a single amount is unsafe across currencies.
+- Global numeric target prices were replaced by per-product targets. Existing currencyless values remain paused until the user safely copies or acknowledges them.
 - Price-history retention now strictly deletes expired entries.
 - Large wishlist selection is paged at 50 items, while tracked-list rendering, charts, focus, and ARIA state remain responsive at hundreds of products.
 - Wishlist continuation advances fairly between lists and resumes unfinished work after about 60 seconds, including after a browser restart.
@@ -41,6 +43,8 @@ All notable changes to this project are documented here. Versions follow semanti
 - Final wishlist reconciliation preserves concurrent individual-tracking decisions and does not delete retained price history.
 - Background checks merge newly observed price samples into the latest history so concurrent manual-sync samples are not lost.
 - Popup-launched `?import=` dashboard sessions remain authorized without broadening bulk-import access to other extension pages.
+- Later-page CAPTCHA/rate-limit results retain bounded wishlist continuation state while activating global backoff.
+- Legacy-target copy and acknowledgement are bound to the top-level Options page and latest Chrome Sync value, preserving unrelated preferences when another browser updates settings.
 
 ## [1.0.0] - 2026-07-04
 

@@ -4,9 +4,13 @@ import vm from 'node:vm';
 import { readFile } from 'node:fs/promises';
 
 const backgroundSource = await readFile(new URL('../background/background.js', import.meta.url), 'utf8');
+const legacyNoticeSource = await readFile(new URL('../background/legacy_target_notice.js', import.meta.url), 'utf8');
+const partialPolicySource = await readFile(new URL('../background/wishlist_partial_policy.js', import.meta.url), 'utf8');
 
-async function loadBackground(initialItems = []) {
+async function loadBackground(initialItems = [], options = {}) {
   let trackedItems = initialItems.map((item) => ({ ...item }));
+  let currentSettings = { ...(options.settings || {}) };
+  let settingsWriteCompleted = false;
   let messageListener;
   const savedItems = [];
   const notifications = [];
@@ -28,6 +32,7 @@ async function loadBackground(initialItems = []) {
       runtime: {
         id: 'test-extension',
         getURL: (path) => `chrome-extension://test-extension/${path}`,
+        async openOptionsPage() {},
         onInstalled: { addListener() {} },
         onStartup: { addListener() {} },
         onMessage: { addListener(listener) { messageListener = listener; } }
@@ -38,7 +43,7 @@ async function loadBackground(initialItems = []) {
         async clear() {},
         onAlarm: { addListener() {} }
       },
-      storage: { onChanged: { addListener() {} } },
+      storage: { local: { async remove() {} }, onChanged: { addListener() {} } },
       notifications: {
         create(id, options) { notifications.push({ id, options }); },
         onButtonClicked: { addListener() {} },
@@ -90,13 +95,14 @@ async function loadBackground(initialItems = []) {
     WISHLIST_SCRAPE_CURSOR: 'wishlistScrapeCursor',
     WISHLIST_SCRAPE_STATE: 'wishlistScrapeState',
     CAPTCHA_BACKOFF_UNTIL: 'captchaBackoffUntil',
-    CAPTCHA_BACKOFF_ATTEMPTS: 'captchaBackoffAttempts'
+    CAPTCHA_BACKOFF_ATTEMPTS: 'captchaBackoffAttempts',
+    LEGACY_TARGET_NOTICE: 'legacyTargetNotice'
   };
   const StorageArea = { LOCAL: 'local', SYNC: 'sync' };
   const storageModule = new vm.SyntheticModule(
     [
-      'getTrackedItems', 'saveTrackedItem', 'updateTrackedItems', 'updatePriceHistory', 'getStorageData',
-      'setStorageItems', 'formatPrice', 'prunePriceHistory', 'StorageKeys', 'StorageArea'
+      'getTrackedItems', 'saveTrackedItem', 'updateTrackedItems', 'updateTrackedItemsIf', 'updateTrackedItemsWithFinalizer', 'updatePriceHistory', 'getStorageData',
+      'setStorageData', 'setStorageItems', 'formatPrice', 'prunePriceHistory', 'StorageKeys', 'StorageArea'
     ],
     function initialize() {
       this.setExport('getTrackedItems', async () => trackedItems);
@@ -109,8 +115,41 @@ async function loadBackground(initialItems = []) {
       this.setExport('updateTrackedItems', async (updater) => {
         trackedItems = updater(trackedItems);
       });
+      this.setExport('updateTrackedItemsIf', async (updater) => {
+        const outcome = updater(trackedItems) || { commit: false };
+        if (outcome.commit) trackedItems = outcome.items;
+        return outcome.result;
+      });
+      this.setExport('updateTrackedItemsWithFinalizer', async (updater, finalizer) => {
+        const originalItems = trackedItems.map((entry) => ({ ...entry }));
+        const outcome = updater(trackedItems) || { commit: false };
+        if (!outcome.commit) return outcome.result;
+        trackedItems = outcome.items;
+        try {
+          await finalizer(outcome.result);
+          return outcome.result;
+        } catch (error) {
+          trackedItems = originalItems;
+          throw error;
+        }
+      });
       this.setExport('updatePriceHistory', async (updater) => { updater({}); });
-      this.setExport('getStorageData', async () => null);
+      this.setExport('getStorageData', async (key, area) => {
+        if (key === StorageKeys.SETTINGS && area === StorageArea.SYNC) {
+          if (options.failSettingsReadAfterWrite && settingsWriteCompleted) {
+            throw new Error('Synthetic Sync readback failure');
+          }
+          return { ...currentSettings };
+        }
+        return null;
+      });
+      this.setExport('setStorageData', async (key, value, area) => {
+        if (key === StorageKeys.SETTINGS && area === StorageArea.SYNC) {
+          if (options.failSettingsWrite) throw new Error('Synthetic Sync write failure');
+          currentSettings = { ...value };
+          settingsWriteCompleted = true;
+        }
+      });
       this.setExport('setStorageItems', async () => {});
       this.setExport('formatPrice', (price, currency) => `${currency || ''}${price}`);
       this.setExport('prunePriceHistory', async () => {});
@@ -120,11 +159,16 @@ async function loadBackground(initialItems = []) {
     { context }
   );
 
+  const legacyNoticeModule = new vm.SourceTextModule(legacyNoticeSource, { context });
+  const partialPolicyModule = new vm.SourceTextModule(partialPolicySource, { context });
+
   const module = new vm.SourceTextModule(backgroundSource, { context });
   await module.link((specifier) => {
     if (specifier === './scraper.js') return scraperModule;
     if (specifier === '../utils/storage.js') return storageModule;
     if (specifier === '../utils/amazon.js') return amazonModule;
+    if (specifier === './legacy_target_notice.js') return legacyNoticeModule;
+    if (specifier === './wishlist_partial_policy.js') return partialPolicyModule;
     throw new Error(`Unexpected import: ${specifier}`);
   });
   await module.evaluate();
@@ -140,7 +184,8 @@ async function loadBackground(initialItems = []) {
     savedItems,
     notifications,
     badgeTexts,
-    getTrackedItems: () => trackedItems
+    getTrackedItems: () => trackedItems,
+    getSettings: () => currentSettings
   };
 }
 
@@ -169,6 +214,15 @@ function dashboardSender(overrides = {}) {
   return {
     id: 'test-extension',
     url: 'chrome-extension://test-extension/src/dashboard/dashboard.html',
+    ...overrides
+  };
+}
+
+function optionsSender(overrides = {}) {
+  return {
+    id: 'test-extension',
+    frameId: 0,
+    url: 'chrome-extension://test-extension/src/options/options.html',
     ...overrides
   };
 }
@@ -301,6 +355,38 @@ describe('target price notifications', () => {
     assert.match(harness.notifications[0].options.message, /target of \$15/);
     assert.match(harness.notifications[0].options.message, /Now: \$14/);
     assert.equal(history.B000000001.length, 4);
+  });
+});
+
+describe('legacy target migration transaction', () => {
+  it('rejects non-Options senders and restores the exact prior collection when Sync acknowledgement fails', async () => {
+    const original = item('B000000001', { currency: '€' });
+    const harness = await loadBackground([original], {
+      settings: { defaultTargetPrice: 12.5, defaultDiscount: 30 },
+      failSettingsWrite: true
+    });
+    const message = {
+      type: 'MIGRATE_LEGACY_TARGET_PRICE',
+      targetPrice: 12.5,
+      currency: '€',
+      expectedCount: 1
+    };
+
+    const unauthorized = await harness.sendMessage(message, dashboardSender());
+    assert.match(unauthorized.error, /Unauthorized/i);
+
+    const failed = await harness.sendMessage(message, optionsSender());
+    assert.match(failed.error, /Synthetic Sync write failure/i);
+    assert.deepEqual(harness.getTrackedItems(), [original]);
+
+    const readbackFailure = await loadBackground([original], {
+      settings: { defaultTargetPrice: 12.5, defaultDiscount: 30 },
+      failSettingsReadAfterWrite: true
+    });
+    const committed = await readbackFailure.sendMessage(message, optionsSender());
+    assert.equal(committed.success, true);
+    assert.equal(readbackFailure.getTrackedItems()[0].targetPrice, 12.5);
+    assert.deepEqual(readbackFailure.getSettings(), { defaultDiscount: 30 });
   });
 });
 

@@ -33,6 +33,7 @@ This document defines the expected behavior of all features in the Amazon Wishli
 - **Network Bounds:** Product and wishlist requests accept only supported HTTPS Amazon URLs and same-identity redirects. HTML content type, 8 MiB per-response size, cumulative wishlist size, and end-to-end time are enforced through body parsing.
 - **Navigation Safety:** Stored legacy Amazon product links are validated against their ASIN and upgraded from HTTP to canonical HTTPS before popup, dashboard, or notification navigation. Malformed, credentialed, lookalike, port-bearing, and identity-mismatched links are not opened.
 - **Anti-Bot Backoff:** If Amazon returns a structurally verified CAPTCHA or HTTP 429/503 Rate Limit, the extension triggers an exponential backoff circuit breaker (up to 24 hours) and pauses all scraping. Freeform words alone do not activate the breaker.
+- **Partial Backoff Continuation:** If a later wishlist page triggers CAPTCHA or rate limiting after earlier pages succeeded, the validated partial result and next-page cursor are retained while global backoff activates. Resumption continues from that cursor; the partial set never authorizes removals.
 - **Recovery:** The standard alarm is one-shot and recreated after each batch. Startup checks and an alarm-handler `finally` block restore it if Chrome terminates a worker or a batch fails unexpectedly.
 
 ---
@@ -56,6 +57,10 @@ This document defines the expected behavior of all features in the Amazon Wishli
 ### 2.5 Extension Icon Badge
 - **Behavior:** A red numerical badge on the extension icon displays the total number of tracked items that currently meet their discount or target price conditions.
 - **Architecture:** Driven by a `chrome.storage.onChanged` listener. Instantly updates when settings change, items are deleted, or prices update.
+
+### 2.6 Legacy Target Review
+- **Behavior:** A valid currencyless `defaultTargetPrice` from an older build remains paused and visible until the user explicitly reviews it. A one-time notification and persistent Dashboard warning route to Extension Settings without treating the notice ID as a product.
+- **Safe Copy:** Automatic copying is accepted only from the top-level Options page, only while the latest Sync `defaultTargetPrice` still exactly matches the reviewed value, only when every latest tracked item has the same known currency, and only when the latest count of products without a target matches the UI-time count. The tracked-item lock remains held through Sync acknowledgement: copied products are marked due now, then only the matching legacy field is removed from a freshly read settings object so unrelated current preferences are preserved. A changed Sync target, mixed/unknown currency, changed eligible count, or failed acknowledgement restores the exact pre-migration tracked collection before the lock is released.
 
 ---
 
@@ -83,6 +88,7 @@ This document defines the expected behavior of all features in the Amazon Wishli
   - Priority and history controls expose their live state through `aria-pressed` and `aria-expanded`. Moving into or out of wishlist selection and product details transfers and restores keyboard focus.
   - At high browser zoom or short viewport heights, the dashboard switches to document scrolling so toolbar controls, product actions, and wishlist import remain reachable without horizontal overflow.
   - Scheduler copy uses user language. A pending 60-second wishlist continuation is shown as the next wishlist sync when it occurs.
+  - A pending legacy currencyless target displays a persistent warning that links to Extension Settings and disappears when the setting is acknowledged.
 
 ### 3.3 Options Page (`options.html`)
 - **Purpose:** Global settings and data export.
@@ -92,6 +98,7 @@ This document defines the expected behavior of all features in the Amazon Wishli
   - Export all raw tracking data to JSON.
   - Clear all price history.
   - Explain that tracked items and price history stay on the device, lightweight preferences may use Chrome sync, exports contain product URLs/prices/history, and clearing history does not stop tracking.
+  - Preserve an older currencyless global target until explicit acknowledgement. Offer a one-click copy only for a revalidated single-currency collection; otherwise direct the user to set per-product targets.
 
 ---
 

@@ -4,6 +4,8 @@ import vm from 'node:vm';
 import { readFile } from 'node:fs/promises';
 
 const source = await readFile(new URL('../background/background.js', import.meta.url), 'utf8');
+const legacyNoticeSource = await readFile(new URL('../background/legacy_target_notice.js', import.meta.url), 'utf8');
+const partialPolicySource = await readFile(new URL('../background/wishlist_partial_policy.js', import.meta.url), 'utf8');
 
 async function loadHarness({ storedState = {}, cursor = 0, scrapeResult, trackedItems = [] } = {}) {
   const storage = new Map([
@@ -37,6 +39,7 @@ async function loadHarness({ storedState = {}, cursor = 0, scrapeResult, tracked
       runtime: {
         id: 'test-extension',
         getURL: (path) => `chrome-extension://test-extension/${path}`,
+        async openOptionsPage() {},
         onInstalled: { addListener() {} },
         onStartup: { addListener() {} },
         onMessage: { addListener() {} }
@@ -47,7 +50,7 @@ async function loadHarness({ storedState = {}, cursor = 0, scrapeResult, tracked
         async clear() {},
         onAlarm: { addListener() {} }
       },
-      storage: { onChanged: { addListener() {} } },
+      storage: { local: { async remove() {} }, onChanged: { addListener() {} } },
       notifications: { create() {}, onButtonClicked: { addListener() {} }, onClicked: { addListener() {} } },
       tabs: { async create() {} },
       action: { async setBadgeText() {}, async setBadgeBackgroundColor() {} }
@@ -87,21 +90,43 @@ async function loadHarness({ storedState = {}, cursor = 0, scrapeResult, tracked
     WISHLIST_SCRAPE_CURSOR: 'wishlistScrapeCursor',
     WISHLIST_SCRAPE_STATE: 'wishlistScrapeState',
     CAPTCHA_BACKOFF_UNTIL: 'captchaBackoffUntil',
-    CAPTCHA_BACKOFF_ATTEMPTS: 'captchaBackoffAttempts'
+    CAPTCHA_BACKOFF_ATTEMPTS: 'captchaBackoffAttempts',
+    LEGACY_TARGET_NOTICE: 'legacyTargetNotice'
   };
   const StorageArea = { LOCAL: 'local', SYNC: 'sync' };
   const storageModule = new vm.SyntheticModule(
-    ['getTrackedItems', 'saveTrackedItem', 'updateTrackedItems', 'updatePriceHistory', 'getStorageData', 'setStorageItems', 'formatPrice', 'prunePriceHistory', 'StorageKeys', 'StorageArea'],
+    ['getTrackedItems', 'saveTrackedItem', 'updateTrackedItems', 'updateTrackedItemsIf', 'updateTrackedItemsWithFinalizer', 'updatePriceHistory', 'getStorageData', 'setStorageData', 'setStorageItems', 'formatPrice', 'prunePriceHistory', 'StorageKeys', 'StorageArea'],
     function initialize() {
       this.setExport('getTrackedItems', async () => storage.get('trackedItems') || []);
       this.setExport('saveTrackedItem', async () => {});
       this.setExport('updateTrackedItems', async (updater) => {
         storage.set('trackedItems', updater(storage.get('trackedItems') || []));
       });
+      this.setExport('updateTrackedItemsIf', async (updater) => {
+        const currentItems = storage.get('trackedItems') || [];
+        const outcome = updater(currentItems) || { commit: false };
+        if (outcome.commit) storage.set('trackedItems', outcome.items);
+        return outcome.result;
+      });
+      this.setExport('updateTrackedItemsWithFinalizer', async (updater, finalizer) => {
+        const currentItems = storage.get('trackedItems') || [];
+        const originalItems = currentItems.map((item) => ({ ...item }));
+        const outcome = updater(currentItems) || { commit: false };
+        if (!outcome.commit) return outcome.result;
+        storage.set('trackedItems', outcome.items);
+        try {
+          await finalizer(outcome.result);
+          return outcome.result;
+        } catch (error) {
+          storage.set('trackedItems', originalItems);
+          throw error;
+        }
+      });
       this.setExport('updatePriceHistory', async (updater) => {
         storage.set('priceHistory', updater(storage.get('priceHistory') || {}));
       });
       this.setExport('getStorageData', async (key) => storage.has(key) ? storage.get(key) : null);
+      this.setExport('setStorageData', async (key, value) => { storage.set(key, value); });
       this.setExport('setStorageItems', async (values) => {
         Object.entries(values).forEach(([key, value]) => storage.set(key, value));
       });
@@ -113,11 +138,16 @@ async function loadHarness({ storedState = {}, cursor = 0, scrapeResult, tracked
     { context }
   );
 
+  const legacyNoticeModule = new vm.SourceTextModule(legacyNoticeSource, { context });
+  const partialPolicyModule = new vm.SourceTextModule(partialPolicySource, { context });
+
   const module = new vm.SourceTextModule(source, { context });
   await module.link((specifier) => {
     if (specifier === './scraper.js') return scraperModule;
     if (specifier === '../utils/storage.js') return storageModule;
     if (specifier === '../utils/amazon.js') return amazonModule;
+    if (specifier === './legacy_target_notice.js') return legacyNoticeModule;
+    if (specifier === './wishlist_partial_policy.js') return partialPolicyModule;
     throw new Error(`Unexpected import: ${specifier}`);
   });
   await module.evaluate();
@@ -230,6 +260,47 @@ describe('bounded and fair wishlist continuation', () => {
     assert.deepEqual(Array.from(state.items, (item) => item.id), ['B000000001', 'B000000002']);
     assert.ok(harness.alarmCreates.some((entry) => entry.name === 'continueWishlistSyncAlarm'));
   });
+
+  for (const error of ['CAPTCHA_BLOCKED', 'RATE_LIMITED']) {
+    it(`preserves partial state and schedules a backed-off continuation after ${error}`, async () => {
+      const startedAt = Date.now() - 60_000;
+      const harness = await loadHarness({
+        storedState: {
+          'LIST-A': {
+            nextPageUrl: 'https://www.amazon.com/hz/wishlist/ls/LIST-A?page=2',
+            items: [wishlistItem('B000000001')],
+            pagesProcessed: 1,
+            bytesProcessed: 1000,
+            startedAt
+          }
+        },
+        scrapeResult: {
+          success: true,
+          complete: false,
+          error,
+          nextPageUrl: 'https://www.amazon.com/hz/wishlist/ls/LIST-A?page=3',
+          items: [wishlistItem('B000000002')],
+          pagesProcessed: 1,
+          bytesProcessed: 500
+        }
+      });
+
+      await harness.api.runWishlistCheckBatch();
+
+      const state = harness.storage.get('wishlistScrapeState')['LIST-A'];
+      assert.equal(state.nextPageUrl, 'https://www.amazon.com/hz/wishlist/ls/LIST-A?page=3');
+      assert.equal(state.pagesProcessed, 2);
+      assert.equal(state.bytesProcessed, 1500);
+      assert.equal(state.startedAt, startedAt);
+      assert.deepEqual(Array.from(state.items, (item) => item.id), ['B000000001', 'B000000002']);
+      assert.ok(Number.isFinite(harness.storage.get('captchaBackoffUntil')));
+      assert.equal(harness.storage.get('captchaBackoffAttempts'), 1);
+      assert.ok(harness.alarmCreates.some((entry) =>
+        entry.name === 'continueWishlistSyncAlarm' &&
+        entry.options.when >= harness.storage.get('captchaBackoffUntil')
+      ));
+    });
+  }
 
   it('discards an expired cumulative state without scraping or deleting tracked data', async () => {
     const harness = await loadHarness({

@@ -9,9 +9,10 @@
     "test:scraper-contract": "node --test src/__tests__/scraper.contract.test.mjs",
     "test:security": "node --test src/__tests__/network.security.mjs && NODE_OPTIONS=--experimental-vm-modules node --test src/__tests__/background.security.test.mjs src/__tests__/storage.security.test.mjs src/__tests__/wishlist.security.test.mjs && node --test src/__tests__/content.security.e2e.mjs",
     "test:e2e": "NODE_OPTIONS=--experimental-vm-modules jest src/__tests__/extension.e2e.test.js --runInBand",
+    "visual:qa": "node scripts/visual-qa.js",
     "validate:release": "node scripts/validate-release.mjs",
     "audit:deps": "npm audit --audit-level=high",
-    "release:check": "npm run audit:deps && npm run validate:release && npm test -- --runInBand && npm run test:scraper-contract && npm run test:security && npm run test:e2e",
+    "release:check": "npm run audit:deps && npm run validate:release && npm test -- --runInBand && npm run test:scraper-contract && npm run test:security && npm run test:e2e && npm run visual:qa",
     "prepublishOnly": "npm run release:check"
   },
   "keywords": ["amazon", "wishlist", "tracker", "chrome-extension"],

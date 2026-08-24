@@ -1,6 +1,8 @@
 import { scrapeAmazonProduct, scrapeAmazonWishlist, closeOffscreenDocument } from './scraper.js';
-import { getTrackedItems, saveTrackedItem, updateTrackedItems, updatePriceHistory, getStorageData, setStorageItems, formatPrice, prunePriceHistory, StorageKeys, StorageArea } from '../utils/storage.js';
+import { getTrackedItems, saveTrackedItem, updateTrackedItems, updateTrackedItemsWithFinalizer, updatePriceHistory, getStorageData, setStorageData, setStorageItems, formatPrice, prunePriceHistory, StorageKeys, StorageArea } from '../utils/storage.js';
 import { normalizeStoredAmazonProductUrl, sanitizeAmazonImageUrl } from '../utils/amazon.js';
+import './legacy_target_notice.js';
+import './wishlist_partial_policy.js';
 
 const AMAZON_HOST_PATTERN = /(^|\.)amazon\.(com|nl|de|fr|es|it|co\.uk)$/i;
 const ASIN_PATTERN = /^[A-Z0-9]{10}$/;
@@ -18,6 +20,12 @@ const WISHLIST_TOTAL_MAX_ITEMS = 2000;
 const WISHLIST_TOTAL_MAX_BYTES = 32 * 1024 * 1024;
 const WISHLIST_TOTAL_MAX_ELAPSED_MS = 6 * 60 * 60 * 1000;
 const WISHLIST_STATE_MAX_BYTES = 12 * 1024 * 1024;
+const {
+  LEGACY_TARGET_NOTIFICATION_ID,
+  decideLegacyTargetNotice,
+  isLegacyTargetNoticeNotification
+} = globalThis.LegacyTargetNotice;
+let legacyTargetNoticeQueue = Promise.resolve();
 
 const STANDARD_PRICE_ALARM = 'checkPricesAlarm';
 const STANDARD_BATCH_DELAY_MS = 30 * 1000;
@@ -27,6 +35,44 @@ const ALARM_DEFINITIONS = [
   ['checkPriorityPricesAlarm', { periodInMinutes: 2 }],
   ['checkWishlistsAlarm', { periodInMinutes: 15 }]
 ];
+
+async function maybeNotifyLegacyTargetUpgrade() {
+  try {
+    const settings = await getStorageData(StorageKeys.SETTINGS, StorageArea.SYNC) || {};
+    const existingMarker = await getStorageData(StorageKeys.LEGACY_TARGET_NOTICE, StorageArea.LOCAL);
+    const decision = await decideLegacyTargetNotice(settings, existingMarker, () =>
+      chrome.notifications.create(LEGACY_TARGET_NOTIFICATION_ID, {
+        type: 'basic',
+        iconUrl: 'assets/icon128.png',
+        title: 'Action needed: previous target price',
+        message: 'Old global target alerts are paused because their currency is unknown. Open Extension Settings to review it.',
+        buttons: [{ title: 'Open Extension Settings' }]
+      })
+    );
+
+    if (decision.clearMarker) {
+      await chrome.storage.local.remove(StorageKeys.LEGACY_TARGET_NOTICE);
+      return;
+    }
+    if (!decision.notify) return;
+
+    await setStorageData(StorageKeys.LEGACY_TARGET_NOTICE, {
+      fingerprint: decision.fingerprint,
+      outcome: decision.outcome
+    }, StorageArea.LOCAL);
+    if (decision.outcome === 'unavailable') {
+      console.warn('Could not show legacy target upgrade notice; the Dashboard warning remains available.');
+    }
+  } catch (error) {
+    console.warn('Could not check legacy target upgrade notice:', error);
+  }
+}
+
+function queueLegacyTargetUpgradeNotice() {
+  const run = legacyTargetNoticeQueue.then(maybeNotifyLegacyTargetUpgrade);
+  legacyTargetNoticeQueue = run.catch(() => {});
+  return run;
+}
 
 function productAsinFromUrl(url) {
   const match = url.pathname.match(PRODUCT_PATH_PATTERN);
@@ -176,6 +222,48 @@ function isAuthorizedDashboardSender(sender) {
   }
 }
 
+function isAuthorizedOptionsSender(sender) {
+  if (sender?.id !== chrome.runtime.id || typeof sender.url !== 'string') return false;
+  if (Number.isInteger(sender.frameId) && sender.frameId !== 0) return false;
+  const optionsUrl = chrome.runtime.getURL?.('src/options/options.html');
+  if (!optionsUrl || sender.url.length > MAX_URL_LENGTH * 2) return false;
+  try {
+    const expected = new URL(optionsUrl);
+    const actual = new URL(sender.url);
+    return actual.origin === expected.origin && actual.pathname === expected.pathname;
+  } catch (_error) {
+    return false;
+  }
+}
+
+async function acknowledgeLegacyTargetPrice(expectedTargetPrice) {
+  const latestSettings = await getStorageData(StorageKeys.SETTINGS, StorageArea.SYNC) || {};
+  const latestTargetPrice = Number(latestSettings.defaultTargetPrice);
+  if (!Object.hasOwn(latestSettings, 'defaultTargetPrice') ||
+      !Number.isFinite(latestTargetPrice) || latestTargetPrice !== expectedTargetPrice) {
+    return { error: 'The previous target changed. Reload Extension Settings and review it again.' };
+  }
+
+  const nextSettings = { ...latestSettings };
+  delete nextSettings.defaultTargetPrice;
+  await setStorageData(StorageKeys.SETTINGS, nextSettings, StorageArea.SYNC);
+  let persistedSettings;
+  try {
+    persistedSettings = await getStorageData(StorageKeys.SETTINGS, StorageArea.SYNC) || {};
+  } catch (error) {
+    // A resolved chrome.storage.set is the commit point. If only the optional
+    // verification read fails, rolling Local items back would leave neither
+    // the legacy setting nor the copied targets. Preserve the committed pair
+    // and let later UI/storage reads observe the acknowledged state.
+    console.warn('Legacy target acknowledgement committed but readback was unavailable:', error);
+    return { settings: nextSettings, readbackUnavailable: true };
+  }
+  if (Object.hasOwn(persistedSettings, 'defaultTargetPrice')) {
+    return { error: 'The previous target could not be acknowledged safely.' };
+  }
+  return { settings: persistedSettings };
+}
+
 async function scheduleStandardPriceCheck(when = Date.now() + STANDARD_BATCH_DELAY_MS) {
   await chrome.alarms.create(STANDARD_PRICE_ALARM, {
     when: Math.max(when, Date.now() + STANDARD_BATCH_DELAY_MS)
@@ -214,13 +302,16 @@ chrome.runtime.onInstalled.addListener(() => {
   console.log('Amazon Wishlist Tracker installed.');
   ensureAlarms();
   updateBadgeCount();
+  queueLegacyTargetUpgradeNotice();
 });
 chrome.runtime.onStartup.addListener(() => {
   ensureAlarms();
   updateBadgeCount();
+  queueLegacyTargetUpgradeNotice();
 });
 ensureAlarms();
 updateBadgeCount();
+queueLegacyTargetUpgradeNotice();
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
   if (
@@ -228,6 +319,9 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
     (areaName === StorageArea.SYNC && changes[StorageKeys.SETTINGS])
   ) {
     updateBadgeCount();
+  }
+  if (areaName === StorageArea.SYNC && changes[StorageKeys.SETTINGS]) {
+    queueLegacyTargetUpgradeNotice();
   }
 });
 
@@ -297,6 +391,98 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse({ success: true });
       } catch (err) {
         sendResponse({ error: err.message || 'Failed to remove item' });
+      }
+    })();
+    return true;
+  }
+
+  if (message.type === 'MIGRATE_LEGACY_TARGET_PRICE') {
+    (async () => {
+      try {
+        if (!isAuthorizedOptionsSender(sender)) {
+          sendResponse({ error: 'Unauthorized legacy target migration.' });
+          return;
+        }
+        const targetPrice = Number(message.targetPrice);
+        const currency = typeof message.currency === 'string' ? message.currency.trim() : '';
+        const expectedCount = Number(message.expectedCount);
+        if (!Number.isFinite(targetPrice) || targetPrice <= 0 || targetPrice > MAX_PRICE_VALUE ||
+            !currency || currency.length > 8 || !Number.isInteger(expectedCount) || expectedCount < 1) {
+          sendResponse({ error: 'Invalid legacy target migration.' });
+          return;
+        }
+
+        const latestSettings = await getStorageData(StorageKeys.SETTINGS, StorageArea.SYNC) || {};
+        const latestLegacyTarget = Number(latestSettings.defaultTargetPrice);
+        if (!Object.hasOwn(latestSettings, 'defaultTargetPrice') ||
+            !Number.isFinite(latestLegacyTarget) || latestLegacyTarget !== targetPrice) {
+          sendResponse({ error: 'The previous target changed. Reload Extension Settings and review it again.' });
+          return;
+        }
+
+        const result = await updateTrackedItemsWithFinalizer((items) => {
+          const itemCurrencies = items.map((item) => typeof item.currency === 'string' ? item.currency.trim() : '');
+          const allItemsShareRequestedCurrency =
+            items.length > 0 &&
+            itemCurrencies.every(Boolean) &&
+            new Set(itemCurrencies).size === 1 &&
+            itemCurrencies[0] === currency;
+          const eligibleCount = items.filter((item) => !Number.isFinite(item.targetPrice)).length;
+          if (!allItemsShareRequestedCurrency || eligibleCount !== expectedCount) {
+            return { commit: false, result: { error: 'Legacy target can no longer be copied safely.' } };
+          }
+
+          const dueNow = Date.now();
+          return {
+            commit: true,
+            items: items.map((item) => Number.isFinite(item.targetPrice)
+              ? item
+              : {
+                  ...item,
+                  targetPrice,
+                  updatedAt: dueNow,
+                  nextPriceCheckAt: dueNow,
+                  checkCadence: 'Legacy target migration · due now'
+                }),
+            result: { updated: eligibleCount }
+          };
+        }, async () => {
+          const acknowledgement = await acknowledgeLegacyTargetPrice(targetPrice);
+          if (acknowledgement.error) throw new Error(acknowledgement.error);
+        });
+        if (result?.error) {
+          sendResponse({ error: result.error });
+          return;
+        }
+        await scheduleStandardPriceCheck();
+        sendResponse({ success: true, updated: result?.updated });
+      } catch (err) {
+        sendResponse({ error: err.message || 'Failed to migrate legacy target.' });
+      }
+    })();
+    return true;
+  }
+
+  if (message.type === 'ACKNOWLEDGE_LEGACY_TARGET_PRICE') {
+    (async () => {
+      try {
+        if (!isAuthorizedOptionsSender(sender)) {
+          sendResponse({ error: 'Unauthorized legacy target acknowledgement.' });
+          return;
+        }
+        const targetPrice = Number(message.targetPrice);
+        if (!Number.isFinite(targetPrice)) {
+          sendResponse({ error: 'Invalid legacy target acknowledgement.' });
+          return;
+        }
+        const result = await acknowledgeLegacyTargetPrice(targetPrice);
+        if (result.error) {
+          sendResponse({ error: result.error });
+          return;
+        }
+        sendResponse({ success: true });
+      } catch (err) {
+        sendResponse({ error: err.message || 'Failed to acknowledge legacy target.' });
       }
     })();
     return true;
@@ -904,7 +1090,8 @@ export async function runWishlistCheckBatch() {
           maxTotalBytes: remainingBytes,
           maxElapsedMs: Math.min(2 * 60 * 1000, remainingElapsed)
         });
-        if (result && BACKOFF_ERRORS.has(result.error)) isBackoffActive = true;
+        const partialDisposition = globalThis.wishlistPartialPolicy.getPartialWishlistDisposition(result);
+        if (BACKOFF_ERRORS.has(result?.error) || partialDisposition.activatesBackoff) isBackoffActive = true;
         if (result && result.success && result.items) {
           const accumulatedById = new Map(previousItems.map(item => [item.id, item]));
           result.items.forEach(item => accumulatedById.set(item.id, item));
@@ -912,7 +1099,7 @@ export async function runWishlistCheckBatch() {
           const pagesProcessed = previousPages + boundedCounter(result.pagesProcessed);
           const bytesProcessed = previousBytes + boundedCounter(result.bytesProcessed);
 
-          if (result.complete === false && result.nextPageUrl && stateKey) {
+          if (partialDisposition.preservesResumeState && stateKey) {
             const candidateState = {
               nextPageUrl: result.nextPageUrl,
               items: result.items,
@@ -1175,12 +1362,20 @@ async function openTrackedItem(notificationId) {
 }
 
 chrome.notifications.onButtonClicked.addListener(async (notificationId, buttonIndex) => {
+  if (isLegacyTargetNoticeNotification(notificationId) && buttonIndex === 0) {
+    await chrome.runtime.openOptionsPage();
+    return;
+  }
   if (buttonIndex === 0) {
     await openTrackedItem(notificationId);
   }
 });
 
 chrome.notifications.onClicked.addListener(async (notificationId) => {
+  if (isLegacyTargetNoticeNotification(notificationId)) {
+    await chrome.runtime.openOptionsPage();
+    return;
+  }
   await openTrackedItem(notificationId);
 });
 

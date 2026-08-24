@@ -105,3 +105,27 @@ describe('legacy trackedItems privacy migration', () => {
     assert.equal(calls.some((call) => call.includes(':set:') || call.includes(':remove:')), false);
   });
 });
+
+describe('tracked-item finalizer transaction', () => {
+  it('restores the exact prior collection on finalizer failure and leaves the mutex usable', async () => {
+    const originalItems = [{ id: 'B000000001', title: 'Original item', currency: '€' }];
+    const { api, areas } = await loadStorage({ local: { trackedItems: originalItems } });
+
+    await assert.rejects(
+      api.updateTrackedItemsWithFinalizer(
+        (items) => ({
+          commit: true,
+          items: items.map((item) => ({ ...item, targetPrice: 12.5 })),
+          result: { updated: 1 }
+        }),
+        async () => { throw new Error('Synthetic finalizer failure'); }
+      ),
+      /Synthetic finalizer failure/
+    );
+    assert.deepEqual(areas.local.get('trackedItems'), originalItems);
+
+    await api.updateTrackedItems((items) => items.map((item) => ({ ...item, isPriority: true })));
+    assert.equal(areas.local.get('trackedItems')[0].isPriority, true);
+    assert.equal(areas.local.get('trackedItems')[0].targetPrice, undefined);
+  });
+});

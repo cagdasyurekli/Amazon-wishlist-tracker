@@ -639,4 +639,100 @@ describe('Chrome extension E2E', () => {
     expect(popup.overflows).toBe(false);
     expect(popup.unnamedButtons).toBe(0);
   }, 30000);
+
+  it('copies a legacy target only after an explicit single-currency action', async () => {
+    await launchExtension();
+
+    const page = await browser.newPage();
+    await page.goto(`chrome-extension://${extensionId}/src/options/options.html`, {
+      waitUntil: 'domcontentloaded'
+    });
+    await page.evaluate(async () => {
+      await chrome.storage.local.set({
+        trackedItems: [{ id: 'BMIGRATE01', title: 'Euro item', currency: '€', currentPrice: 20 }]
+      });
+      await chrome.storage.sync.set({ settings: {
+        defaultTargetPrice: 12.5,
+        defaultDiscount: 20,
+        dashboardSort: 'oldest'
+      } });
+      window.location.reload();
+    });
+    await page.waitForSelector('#legacy-target-apply-btn:not([hidden])');
+    await expect(page.$eval('#legacy-target-apply-btn', (node) => node.textContent)).resolves.toBe('Apply €12.50 to 1 product');
+
+    // Model a remote Chrome Sync update after this Options page loaded. The
+    // stale page must neither apply 12.5 nor overwrite unrelated latest keys.
+    await page.evaluate(async () => {
+      await chrome.storage.sync.set({ settings: {
+        defaultTargetPrice: 99,
+        defaultDiscount: 30,
+        dashboardSort: 'priceAsc'
+      } });
+    });
+    await page.click('#legacy-target-apply-btn');
+    await page.waitForFunction(() => document.querySelector('#settings-status')?.textContent.includes('Could not migrate'));
+    const staleAttempt = await page.evaluate(async () => {
+      const [{ trackedItems }, { settings }] = await Promise.all([
+        chrome.storage.local.get(['trackedItems']),
+        chrome.storage.sync.get(['settings'])
+      ]);
+      return { trackedItems, settings };
+    });
+    expect(staleAttempt.trackedItems[0].targetPrice).toBeUndefined();
+    expect(staleAttempt.settings).toEqual({
+      defaultTargetPrice: 99,
+      defaultDiscount: 30,
+      dashboardSort: 'priceAsc'
+    });
+
+    await page.evaluate(async () => {
+      await chrome.storage.sync.set({ settings: {
+        defaultTargetPrice: 12.5,
+        defaultDiscount: 30,
+        dashboardSort: 'priceAsc'
+      } });
+      window.location.reload();
+    });
+    await page.waitForSelector('#legacy-target-apply-btn:not([hidden])');
+    await page.click('#legacy-target-apply-btn');
+    await page.waitForFunction(async () => {
+      const [{ trackedItems }, { settings }] = await Promise.all([
+        chrome.storage.local.get(['trackedItems']),
+        chrome.storage.sync.get(['settings'])
+      ]);
+      return trackedItems?.[0]?.targetPrice === 12.5 &&
+        Number.isFinite(trackedItems?.[0]?.nextPriceCheckAt) &&
+        trackedItems?.[0]?.checkCadence === 'Legacy target migration · due now' &&
+        !Object.hasOwn(settings || {}, 'defaultTargetPrice') &&
+        settings.defaultDiscount === 30 &&
+        settings.dashboardSort === 'priceAsc';
+    });
+
+    await page.evaluate(async () => {
+      await chrome.storage.local.set({
+        trackedItems: [
+          { id: 'BMIXED001', title: 'Euro item', currency: '€', currentPrice: 20 },
+          { id: 'BMIXED002', title: 'Dollar item', currency: '$', currentPrice: 20 }
+        ]
+      });
+      await chrome.storage.sync.set({ settings: { defaultTargetPrice: 10 } });
+      window.location.reload();
+    });
+    await page.waitForSelector('#legacy-target-migration:not([hidden])');
+    await expect(page.$eval('#legacy-target-apply-btn', (node) => node.hidden)).resolves.toBe(true);
+
+    const rejected = await page.evaluate(async () => {
+      const response = await chrome.runtime.sendMessage({
+        type: 'MIGRATE_LEGACY_TARGET_PRICE',
+        targetPrice: 10,
+        currency: '€',
+        expectedCount: 1
+      });
+      const { trackedItems } = await chrome.storage.local.get(['trackedItems']);
+      return { response, trackedItems };
+    });
+    expect(rejected.response.error).toBe('Legacy target can no longer be copied safely.');
+    expect(rejected.trackedItems.every((item) => !Number.isFinite(item.targetPrice))).toBe(true);
+  }, 30000);
 });

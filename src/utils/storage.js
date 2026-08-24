@@ -24,7 +24,11 @@ export const StorageKeys = {
   WISHLIST_SCRAPE_CURSOR: 'wishlistScrapeCursor',
   WISHLIST_SCRAPE_STATE: 'wishlistScrapeState',
   CAPTCHA_BACKOFF_UNTIL: 'captchaBackoffUntil',
-  CAPTCHA_BACKOFF_ATTEMPTS: 'captchaBackoffAttempts'
+  CAPTCHA_BACKOFF_ATTEMPTS: 'captchaBackoffAttempts',
+
+  // Opaque marker for the one-time legacy target migration notice. The old
+  // target value itself remains only in settings until the user reviews it.
+  LEGACY_TARGET_NOTICE: 'legacyTargetNotice'
 };
 
 /**
@@ -153,6 +157,48 @@ export function updateTrackedItems(updater) {
     const items = await getTrackedItems();
     const next = updater(items);
     await setStorageData(StorageKeys.TRACKED_ITEMS, next, StorageArea.LOCAL);
+  });
+}
+
+/**
+ * Runs a validated tracked-item mutation under the shared save lock. Returning
+ * `{ commit: false }` leaves storage untouched so UI-time assumptions can be
+ * rechecked against the latest collection before a migration is applied.
+ * @param {(items: Array<Object>) => {commit: boolean, items?: Array<Object>, result?: any}} updater
+ * @returns {Promise<any>} the updater's result
+ */
+export function updateTrackedItemsIf(updater) {
+  return withSaveLock(async () => {
+    const items = await getTrackedItems();
+    const outcome = updater(items) || { commit: false };
+    if (!outcome.commit) return outcome.result;
+    await setStorageData(StorageKeys.TRACKED_ITEMS, outcome.items, StorageArea.LOCAL);
+    return outcome.result;
+  });
+}
+
+/**
+ * Applies a tracked-item update and keeps the shared lock until an external
+ * finalizer succeeds. If the finalizer fails, the exact pre-update collection
+ * is restored before another tracked-item mutation can run.
+ * @param {(items: Array<Object>) => {commit: boolean, items?: Array<Object>, result?: any}} updater
+ * @param {(result: any) => Promise<void>} finalizer
+ * @returns {Promise<any>} the updater's result
+ */
+export function updateTrackedItemsWithFinalizer(updater, finalizer) {
+  return withSaveLock(async () => {
+    const items = await getTrackedItems();
+    const outcome = updater(items) || { commit: false };
+    if (!outcome.commit) return outcome.result;
+
+    await setStorageData(StorageKeys.TRACKED_ITEMS, outcome.items, StorageArea.LOCAL);
+    try {
+      await finalizer(outcome.result);
+      return outcome.result;
+    } catch (error) {
+      await setStorageData(StorageKeys.TRACKED_ITEMS, items, StorageArea.LOCAL);
+      throw error;
+    }
   });
 }
 
