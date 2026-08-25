@@ -91,7 +91,9 @@ async function fetchAndParse(url, messageType, { deadlineAt, maxBytes, validateU
   if (!requestedUrl) throw new Error('INVALID_AMAZON_URL');
 
   const controller = new AbortController();
-  const remainingMs = Math.min(FETCH_TIMEOUT_MS, ensureTimeRemaining(deadlineAt));
+  const operationRemainingMs = ensureTimeRemaining(deadlineAt);
+  const remainingMs = Math.min(FETCH_TIMEOUT_MS, operationRemainingMs);
+  const operationDeadlineLimited = operationRemainingMs <= FETCH_TIMEOUT_MS;
   let timeoutId;
 
   try {
@@ -106,7 +108,9 @@ async function fetchAndParse(url, messageType, { deadlineAt, maxBytes, validateU
 
       timeoutId = setTimeout(() => {
         controller.abort();
-        finish(reject, new Error('FETCH_TIMEOUT'));
+        const timeoutError = new Error('FETCH_TIMEOUT');
+        timeoutError.operationDeadlineExceeded = operationDeadlineLimited;
+        finish(reject, timeoutError);
       }, remainingMs);
 
       (async () => {
@@ -331,7 +335,9 @@ export async function scrapeAmazonWishlist(url, options = {}) {
     };
   } catch (error) {
     const code = errorCode(error);
-    if (code === 'FETCH_TIMEOUT' && Date.now() >= deadlineAt) stopReason = 'max_elapsed';
+    if (code === 'FETCH_TIMEOUT' && (error.operationDeadlineExceeded || Date.now() >= deadlineAt)) {
+      stopReason = 'max_elapsed';
+    }
     else if (code === 'RESPONSE_TOO_LARGE') stopReason = 'max_total_bytes';
     else stopReason = 'error';
 

@@ -26,6 +26,7 @@ All notable changes to this project are documented here. Versions follow semanti
 - Ambiguous legacy wishlist regions remain fail-closed without guessing `.com`, visibly request review, and resume automatic sync only after the real URL is supplied.
 - First successful checks establish alert state without notifying when a target was already met.
 - Temporary dashboard filter links no longer overwrite or reapply after the user chooses a persistent filter.
+- Operation-deadline body timeouts retain the correct `max_elapsed` stop reason across timer-resolution differences on CI hosts.
 
 ### Security
 
