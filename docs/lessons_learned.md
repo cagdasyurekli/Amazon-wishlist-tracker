@@ -253,6 +253,12 @@ Current coverage: CAPTCHA (title + body), standard parse, US & EU thousands sepa
 - **Puppeteer with Jest CommonJS (Codex):** Keep Chrome extension E2E tests in [extension.e2e.test.js](../src/__tests__/extension.e2e.test.js). Use dynamic `import('puppeteer')` inside the Jest test and run it with `NODE_OPTIONS=--experimental-vm-modules` to avoid Puppeteer's ESM/CommonJS friction.
 - **Separate unit and browser tests (Codex):** `npm test` is intentionally unit-only and sandbox-friendly. Run `npm run test:e2e` for headless Chrome extension loading with `--disable-extensions-except` and `--load-extension`.
 - **Manifest assets are test prerequisites (Codex):** Keep every manifest-referenced icon checked in. Missing `assets/icon*.png` files prevented the MV3 service worker from appearing in Puppeteer and made the failure look like a test harness issue.
+
+# 2026-08-25: every producer must share the destructive-data coordinator
+
+- A manual network action is still a scrape job. Dashboard wishlist extraction must join the same queue, persisted backoff, anti-bot disposition, and offscreen cleanup as alarm-driven work.
+- A storage mutex is local to one extension JavaScript context. Route destructive cross-context actions such as clearing history through the background coordinator, keep the clear under the storage mutex, and advance a persisted generation across clear/restore so UI round trips that started earlier cannot append afterward.
+- E2E assertions should prefer durable completion state over a transient disabled/loading frame; faster browser releases can legitimately complete before the next Puppeteer round trip.
 # 2026-08-24: security controls must preserve authorized query-bearing extension flows
 
 - Comparing an extension sender URL as a raw string rejected the legitimate popup-to-dashboard `?import=` flow. Authorize the canonical extension origin and exact page path, then validate the message payload independently.

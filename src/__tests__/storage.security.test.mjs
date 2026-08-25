@@ -5,7 +5,14 @@ import { readFile } from 'node:fs/promises';
 
 const storageSource = await readFile(new URL('../utils/storage.js', import.meta.url), 'utf8');
 
-async function loadStorage({ local = {}, sync = {}, failLocalSet = false, failSyncSet = false, corruptReadback = false } = {}) {
+async function loadStorage({
+  local = {},
+  sync = {},
+  failLocalSet = false,
+  failSyncSet = false,
+  corruptReadback = false,
+  beforeHistoryRead = null
+} = {}) {
   const areas = {
     local: new Map(Object.entries(local)),
     sync: new Map(Object.entries(sync))
@@ -16,6 +23,9 @@ async function loadStorage({ local = {}, sync = {}, failLocalSet = false, failSy
     async get(keys) {
       const requestedKeys = Array.isArray(keys) ? keys : [keys];
       calls.push(`${name}:get:${requestedKeys.join(',')}`);
+      if (name === 'local' && requestedKeys.includes('priceHistory') && beforeHistoryRead) {
+        await beforeHistoryRead();
+      }
       if (name === 'local' && corruptReadback && localSetAttempted) {
         return { [requestedKeys[0]]: [{ id: 'CORRUPTED' }] };
       }
@@ -117,6 +127,7 @@ describe('validated backup replacement', () => {
     const { api, areas, calls } = await loadStorage({
       local: {
         trackedItems: [{ id: 'B000000001' }],
+        priceHistoryGeneration: 4,
         lastScrapeTime: 123,
         wishlistScrapeState: { stale: true },
         captchaBackoffUntil: 999999,
@@ -135,6 +146,7 @@ describe('validated backup replacement', () => {
 
     assert.deepEqual(areas.local.get('trackedItems'), replacement.items);
     assert.deepEqual(areas.local.get('priceHistory'), replacement.history);
+    assert.equal(areas.local.get('priceHistoryGeneration'), 5);
     assert.deepEqual(areas.local.get('trackedWishlists'), replacement.trackedWishlists);
     assert.equal(areas.local.get('lastScrapeTime'), null);
     assert.equal(areas.local.get('scrapeCursor'), 0);
@@ -185,6 +197,41 @@ describe('validated backup replacement', () => {
 
     assert.deepEqual(areas.local.get('trackedItems'), originalItems);
     assert.equal(areas.local.get('scrapeCursor'), 4);
+  });
+});
+
+describe('price history deletion transaction', () => {
+  it('waits for an in-flight history mutation, then clears and advances the generation', async () => {
+    let releaseHistoryRead;
+    let markHistoryReadStarted;
+    const historyReadStarted = new Promise((resolve) => { markHistoryReadStarted = resolve; });
+    const historyReadBarrier = new Promise((resolve) => { releaseHistoryRead = resolve; });
+    let firstHistoryRead = true;
+    const { api, areas } = await loadStorage({
+      local: {
+        priceHistory: { B000000001: [{ price: 10, timestamp: Date.now() }] },
+        priceHistoryGeneration: 3
+      },
+      sync: { settings: { historyRetentionDays: 'forever' } },
+      beforeHistoryRead: async () => {
+        if (!firstHistoryRead) return;
+        firstHistoryRead = false;
+        markHistoryReadStarted();
+        await historyReadBarrier;
+      }
+    });
+
+    const pendingMutation = api.updatePriceHistory((history) => history);
+    await historyReadStarted;
+    let clearCompleted = false;
+    const pendingClear = api.clearPriceHistory().then(() => { clearCompleted = true; });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(clearCompleted, false);
+
+    releaseHistoryRead();
+    await Promise.all([pendingMutation, pendingClear]);
+    assert.equal(Object.keys(areas.local.get('priceHistory')).length, 0);
+    assert.equal(areas.local.get('priceHistoryGeneration'), 4);
   });
 });
 

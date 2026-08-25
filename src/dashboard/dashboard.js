@@ -372,6 +372,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   
   let extractedWishlistItems = [];
   let currentWishlistUrl = '';
+  let extractedWishlistHistoryGeneration = 0;
 
   function showSelectionStatus(message, type = 'error') {
     if (!selectionStatus) return;
@@ -438,8 +439,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   async function extractWishlistItems(url) {
+    const historyGeneration = Number(
+      await getStorageData(StorageKeys.PRICE_HISTORY_GENERATION, StorageArea.LOCAL)
+    ) || 0;
     const visibleResponse = await extractVisibleWishlistFromOpenTab(url);
-    if (visibleResponse) return visibleResponse;
+    if (visibleResponse) return { ...visibleResponse, historyGeneration };
 
     return new Promise((resolve) => {
       chrome.runtime.sendMessage({ type: 'EXTRACT_WISHLIST', url }, (response) => {
@@ -450,6 +454,15 @@ document.addEventListener('DOMContentLoaded', async () => {
         resolve(response);
       });
     });
+  }
+
+  function wishlistPauseMessage(response, fallback) {
+    if (!response?.paused) return fallback;
+    const resumeAt = Number(response.backoffUntil);
+    const resumeText = Number.isFinite(resumeAt) && resumeAt > Date.now()
+      ? ` until ${new Date(resumeAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+      : '';
+    return `Amazon paused background wishlist reads${resumeText}. Wait for the pause to end, then try again.`;
   }
 
   function renderSelectionPage() {
@@ -537,12 +550,16 @@ document.addEventListener('DOMContentLoaded', async () => {
     buttonEl.disabled = false;
 
     if (!response || !response.success) {
-      showStatus('Could not read this wishlist. Confirm it is shared, then reload the list and try again.', 'error');
+      showStatus(wishlistPauseMessage(
+        response,
+        'Could not read this wishlist. Confirm it is shared, then reload the list and try again.'
+      ), 'error');
       wishlistInput.focus();
       return;
     }
 
     extractedWishlistItems = response.items || [];
+    extractedWishlistHistoryGeneration = response.historyGeneration || 0;
     if (extractedWishlistItems.length === 0) {
       showStatus('No products were found on this wishlist.', 'error');
       wishlistInput.focus();
@@ -552,8 +569,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     selectionPage = 0;
     selectedWishlistIndices = new Set(extractedWishlistItems.map((_, index) => index));
     clearSelectionStatus();
-    if (response.limited) {
-      showSelectionStatus('This visible list exceeds the 2,000-product safety limit. Review and import the first 2,000 products shown here.', 'info');
+    if (response.paused) {
+      showSelectionStatus(
+        `${wishlistPauseMessage(response, 'Amazon paused background wishlist reads.')} ` +
+        `You can still review the ${extractedWishlistItems.length} products found before the pause.`,
+        'info'
+      );
+    } else if (response.limited) {
+      showSelectionStatus('Only a bounded partial list could be read. Review the products shown here before importing them.', 'info');
     }
     renderSelectionPage();
     openSecondaryView(selectionView, selectionTitle, buttonEl);
@@ -583,7 +606,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (!response || !response.success || !response.items?.length) {
       buttonEl.textContent = originalText;
       buttonEl.disabled = false;
-      showStatus('Could not sync this wishlist. Open or reload the shared list, then try again.', 'error');
+      showStatus(wishlistPauseMessage(
+        response,
+        'Could not sync this wishlist. Open or reload the shared list, then try again.'
+      ), 'error');
       return;
     }
 
@@ -593,7 +619,11 @@ document.addEventListener('DOMContentLoaded', async () => {
       wishlistIds: wishlistId ? [wishlistId] : []
     }));
     setButtonProgress(buttonEl, `Saving ${response.items.length} products...`, 'info');
-    chrome.runtime.sendMessage({ type: 'BULK_ADD_TRACKED_ITEMS', items: syncedItems }, async (saveResponse) => {
+    chrome.runtime.sendMessage({
+      type: 'BULK_ADD_TRACKED_ITEMS',
+      items: syncedItems,
+      historyGeneration: response.historyGeneration || 0
+    }, async (saveResponse) => {
       buttonEl.textContent = originalText;
       buttonEl.disabled = false;
       if (chrome.runtime.lastError || !saveResponse?.success) {
@@ -602,10 +632,12 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
       await renderItems();
       showStatus(
-        response.limited
-          ? `Wishlist sync refreshed the first ${response.items.length} visible products (2,000-product safety limit).`
+        response.paused
+          ? `${response.items.length} products found before Amazon paused background reads were refreshed. Wait for the pause to end before syncing again.`
+          : response.limited
+            ? `Wishlist sync refreshed ${response.items.length} products from a bounded partial read.`
           : `Wishlist synced (${response.items.length} products refreshed).`,
-        response.limited ? 'info' : 'success'
+        response.limited || response.paused ? 'info' : 'success'
       );
     });
   };
@@ -668,7 +700,11 @@ document.addEventListener('DOMContentLoaded', async () => {
       ...item,
       wishlistIds: wishlistId ? [wishlistId] : []
     }));
-    chrome.runtime.sendMessage({ type: 'BULK_ADD_TRACKED_ITEMS', items: sourcedItems }, async (response) => {
+    chrome.runtime.sendMessage({
+      type: 'BULK_ADD_TRACKED_ITEMS',
+      items: sourcedItems,
+      historyGeneration: extractedWishlistHistoryGeneration
+    }, async (response) => {
       confirmBtn.textContent = 'Confirm Tracking';
       confirmBtn.disabled = false;
       

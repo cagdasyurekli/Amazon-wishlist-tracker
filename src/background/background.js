@@ -1,5 +1,5 @@
 import { scrapeAmazonProduct, scrapeAmazonWishlist, closeOffscreenDocument } from './scraper.js';
-import { getTrackedItems, saveTrackedItem, updateTrackedItems, updateTrackedItemsWithFinalizer, replaceTrackingData, updatePriceHistory, getStorageData, setStorageData, setStorageItems, formatPrice, prunePriceHistory, StorageKeys, StorageArea } from '../utils/storage.js';
+import { getTrackedItems, saveTrackedItem, updateTrackedItems, updateTrackedItemsWithFinalizer, replaceTrackingData, updatePriceHistory, clearPriceHistory, getStorageData, setStorageData, setStorageItems, formatPrice, prunePriceHistory, StorageKeys, StorageArea } from '../utils/storage.js';
 import { normalizeStoredAmazonProductUrl, sanitizeAmazonImageUrl } from '../utils/amazon.js';
 import { validateBackupPayload } from '../utils/backup.js';
 import './legacy_target_notice.js';
@@ -339,8 +339,13 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
   if (alarm.name === 'checkPricesAlarm') {
     console.log('Running scheduled price check...');
     try {
-      await enqueueScrapeJob(runPriceCheckBatch);
-      await prunePriceHistory();
+      // Keep retention maintenance inside the same ordering boundary as the
+      // batch so restore/clear cannot commit between its settings read and
+      // history write.
+      await enqueueScrapeJob(async () => {
+        await runPriceCheckBatch();
+        await prunePriceHistory();
+      });
     } catch (err) {
       console.error('Adaptive price batch failed:', err);
     } finally {
@@ -515,6 +520,24 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (message.type === 'CLEAR_PRICE_HISTORY') {
+    (async () => {
+      try {
+        if (!isAuthorizedOptionsSender(sender)) {
+          sendResponse({ error: 'Unauthorized price history clear.' });
+          return;
+        }
+        // A completed clear must be ordered after every scrape or wishlist
+        // import that could still append a sample captured before the click.
+        await enqueueScrapeJob(clearPriceHistory);
+        sendResponse({ success: true });
+      } catch (err) {
+        sendResponse({ error: err.message || 'Failed to clear price history.' });
+      }
+    })();
+    return true;
+  }
+
   if (message.type === 'ADD_TRACKED_ITEM') {
     (async () => {
       try {
@@ -568,18 +591,63 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'EXTRACT_WISHLIST') {
     (async () => {
       try {
+        if (!isAuthorizedDashboardSender(sender)) {
+          sendResponse({ error: 'Unauthorized wishlist extraction request.' });
+          return;
+        }
         const url = message.url;
-        const result = await scrapeAmazonWishlist(url);
+        const result = await enqueueScrapeJob(async () => {
+          const historyGeneration = Number(
+            await getStorageData(StorageKeys.PRICE_HISTORY_GENERATION, StorageArea.LOCAL)
+          ) || 0;
+          const backoffUntil = await getStorageData(StorageKeys.CAPTCHA_BACKOFF_UNTIL, StorageArea.LOCAL);
+          if (backoffUntil && Date.now() < backoffUntil) {
+            return {
+              success: false,
+              error: 'SCRAPE_BACKOFF_ACTIVE',
+              paused: true,
+              backoffUntil,
+              historyGeneration
+            };
+          }
+
+          try {
+            const scrapeResult = await scrapeAmazonWishlist(url);
+            if (!BACKOFF_ERRORS.has(scrapeResult?.error)) {
+              if (scrapeResult?.success) await clearBackoff();
+              return { ...scrapeResult, historyGeneration };
+            }
+
+            const activatedUntil = await activateBackoff();
+            return {
+              ...scrapeResult,
+              paused: true,
+              backoffUntil: activatedUntil,
+              historyGeneration
+            };
+          } finally {
+            await closeOffscreenDocument();
+          }
+        });
         if (result.success) {
           sendResponse({
             success: true,
             items: result.items,
             complete: result.complete === true,
             limited: result.complete !== true,
-            stopReason: result.stopReason || null
+            stopReason: result.stopReason || null,
+            error: result.error || null,
+            paused: result.paused === true,
+            backoffUntil: result.backoffUntil || null,
+            historyGeneration: result.historyGeneration || 0
           });
         } else {
-          sendResponse({ error: result.error });
+          sendResponse({
+            error: result.error,
+            paused: result.paused === true,
+            backoffUntil: result.backoffUntil || null,
+            historyGeneration: result.historyGeneration || 0
+          });
         }
       } catch (err) {
         console.error('Failed to extract wishlist:', err);
@@ -595,89 +663,94 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         if (!isAuthorizedDashboardSender(sender)) {
           throw new Error('Unauthorized wishlist import request.');
         }
-        if (!Array.isArray(message.items) || message.items.length === 0 || message.items.length > MAX_BULK_IMPORT_ITEMS) {
-          throw new Error(`Wishlist imports are limited to ${MAX_BULK_IMPORT_ITEMS} products at a time.`);
-        }
-        const rawItemsById = new Map();
-        message.items.forEach((rawItem) => {
-          if (!rawItem || typeof rawItem !== 'object' || Array.isArray(rawItem)) throw new Error('Invalid wishlist item.');
-          const id = typeof rawItem.id === 'string' ? rawItem.id.toUpperCase() : '';
-          if (!ASIN_PATTERN.test(id)) throw new Error('Invalid wishlist product identifier.');
-          rawItemsById.set(id, { ...rawItem, id });
-        });
-        const rawItems = [...rawItemsById.values()];
-        const historyObj = await getStorageData(StorageKeys.PRICE_HISTORY, StorageArea.LOCAL) || {};
-        const historyBaselineLengths = captureHistoryLengths(historyObj);
-        const historyChangedIds = new Set();
-        const settings = await getStorageData(StorageKeys.SETTINGS, StorageArea.SYNC) || {};
-        const defaultDiscount = settings.defaultDiscount ? parseInt(settings.defaultDiscount, 10) : null;
-        const checkedAt = Date.now();
-        
-        let itemsChanged = false;
-        let historyChanged = false;
-
-        const recordWishlistFetch = (itemId, price) => {
-          if (!itemId || !Number.isFinite(price)) return;
-          if (!historyObj[itemId]) historyObj[itemId] = [];
-          historyObj[itemId].push({ price, timestamp: checkedAt });
-          historyChangedIds.add(itemId);
-          historyChanged = true;
-        };
-        
-        await updateTrackedItems((items) => {
-          const existingIds = new Set(items.map((item) => item.id));
-          const newCount = rawItems.filter((item) => !existingIds.has(item.id)).length;
-          if (items.length + newCount > MAX_TRACKED_ITEMS) {
-            throw new Error(`Tracking is limited to ${MAX_TRACKED_ITEMS} products.`);
+        await enqueueScrapeJob(async () => {
+          if (!Array.isArray(message.items) || message.items.length === 0 || message.items.length > MAX_BULK_IMPORT_ITEMS) {
+            throw new Error(`Wishlist imports are limited to ${MAX_BULK_IMPORT_ITEMS} products at a time.`);
           }
-          rawItems.forEach(rawItem => {
-            const existingItem = items.find(i => i.id === rawItem.id);
-            const newItem = sanitizeBulkTrackedItem(rawItem, existingItem || null);
-            if (!existingItem) {
-              const itemToSave = {
-                ...newItem,
-                addedAt: checkedAt,
-                lastChecked: checkedAt,
-                updatedAt: checkedAt
-              };
-              if (defaultDiscount && !itemToSave.targetDiscountPercentage) {
-                itemToSave.targetDiscountPercentage = defaultDiscount;
-              }
-              items.push(itemToSave);
-              recordWishlistFetch(itemToSave.id, itemToSave.currentPrice);
-              setNextAdaptiveCheck(itemToSave, historyObj, checkedAt);
-              itemsChanged = true;
-              return;
-            }
-
-            for (const field of ['title', 'currentPrice', 'currency', 'inStock']) {
-              if (newItem[field] != null) existingItem[field] = newItem[field];
-            }
-            if (newItem.url) existingItem.url = newItem.url;
-            if (newItem.imageUrl) existingItem.imageUrl = newItem.imageUrl;
-            if (newItem.originalPrice && (!existingItem.originalPrice || newItem.originalPrice > existingItem.originalPrice)) {
-              existingItem.originalPrice = newItem.originalPrice;
-            }
-            for (const field of ['wishlistPriceDropPercent', 'wishlistPriceWhenAdded', 'wishlistPriceDropAmount', 'wishlistPriceDropText']) {
-              if (newItem[field] != null) existingItem[field] = newItem[field];
-            }
-            if (Array.isArray(newItem.wishlistIds)) {
-              existingItem.wishlistIds = [...new Set([...(existingItem.wishlistIds || []), ...newItem.wishlistIds])];
-            }
-            existingItem.lastChecked = checkedAt;
-            existingItem.updatedAt = checkedAt;
-            recordWishlistFetch(existingItem.id, newItem.currentPrice);
-            setNextAdaptiveCheck(existingItem, historyObj, checkedAt);
-            itemsChanged = true;
+          const rawItemsById = new Map();
+          message.items.forEach((rawItem) => {
+            if (!rawItem || typeof rawItem !== 'object' || Array.isArray(rawItem)) throw new Error('Invalid wishlist item.');
+            const id = typeof rawItem.id === 'string' ? rawItem.id.toUpperCase() : '';
+            if (!ASIN_PATTERN.test(id)) throw new Error('Invalid wishlist product identifier.');
+            rawItemsById.set(id, { ...rawItem, id });
           });
-          return items;
-        });
-        await scheduleStandardPriceCheck();
+          const rawItems = [...rawItemsById.values()];
+          const historyObj = await getStorageData(StorageKeys.PRICE_HISTORY, StorageArea.LOCAL) || {};
+          const historyBaselineLengths = captureHistoryLengths(historyObj);
+          const historyChangedIds = new Set();
+          const currentHistoryGeneration = Number(
+            await getStorageData(StorageKeys.PRICE_HISTORY_GENERATION, StorageArea.LOCAL)
+          ) || 0;
+          const requestedHistoryGeneration = Number.isSafeInteger(message.historyGeneration) && message.historyGeneration >= 0
+            ? message.historyGeneration
+            : null;
+          const settings = await getStorageData(StorageKeys.SETTINGS, StorageArea.SYNC) || {};
+          const defaultDiscount = settings.defaultDiscount ? parseInt(settings.defaultDiscount, 10) : null;
+          const checkedAt = Date.now();
 
-        if (historyChanged) {
-          await persistHistoryAppends(historyObj, historyBaselineLengths, historyChangedIds);
-        }
-        
+          let historyChanged = false;
+
+          const recordWishlistFetch = (itemId, price) => {
+            if (!itemId || !Number.isFinite(price)) return;
+            if (!historyObj[itemId]) historyObj[itemId] = [];
+            historyObj[itemId].push({ price, timestamp: checkedAt });
+            historyChangedIds.add(itemId);
+            historyChanged = true;
+          };
+
+          await updateTrackedItems((items) => {
+            const existingIds = new Set(items.map((item) => item.id));
+            const newCount = rawItems.filter((item) => !existingIds.has(item.id)).length;
+            if (items.length + newCount > MAX_TRACKED_ITEMS) {
+              throw new Error(`Tracking is limited to ${MAX_TRACKED_ITEMS} products.`);
+            }
+            rawItems.forEach(rawItem => {
+              const existingItem = items.find(i => i.id === rawItem.id);
+              const newItem = sanitizeBulkTrackedItem(rawItem, existingItem || null);
+              if (!existingItem) {
+                const itemToSave = {
+                  ...newItem,
+                  addedAt: checkedAt,
+                  lastChecked: checkedAt,
+                  updatedAt: checkedAt
+                };
+                if (defaultDiscount && !itemToSave.targetDiscountPercentage) {
+                  itemToSave.targetDiscountPercentage = defaultDiscount;
+                }
+                items.push(itemToSave);
+                recordWishlistFetch(itemToSave.id, itemToSave.currentPrice);
+                setNextAdaptiveCheck(itemToSave, historyObj, checkedAt);
+                return;
+              }
+
+              for (const field of ['title', 'currentPrice', 'currency', 'inStock']) {
+                if (newItem[field] != null) existingItem[field] = newItem[field];
+              }
+              if (newItem.url) existingItem.url = newItem.url;
+              if (newItem.imageUrl) existingItem.imageUrl = newItem.imageUrl;
+              if (newItem.originalPrice && (!existingItem.originalPrice || newItem.originalPrice > existingItem.originalPrice)) {
+                existingItem.originalPrice = newItem.originalPrice;
+              }
+              for (const field of ['wishlistPriceDropPercent', 'wishlistPriceWhenAdded', 'wishlistPriceDropAmount', 'wishlistPriceDropText']) {
+                if (newItem[field] != null) existingItem[field] = newItem[field];
+              }
+              if (Array.isArray(newItem.wishlistIds)) {
+                existingItem.wishlistIds = [...new Set([...(existingItem.wishlistIds || []), ...newItem.wishlistIds])];
+              }
+              existingItem.lastChecked = checkedAt;
+              existingItem.updatedAt = checkedAt;
+              recordWishlistFetch(existingItem.id, newItem.currentPrice);
+              setNextAdaptiveCheck(existingItem, historyObj, checkedAt);
+            });
+            return items;
+          });
+          await scheduleStandardPriceCheck();
+
+          if (historyChanged && requestedHistoryGeneration === currentHistoryGeneration) {
+            await persistHistoryAppends(historyObj, historyBaselineLengths, historyChangedIds);
+          }
+        });
+
         sendResponse({ success: true });
       } catch (err) {
         console.error('Failed to bulk add tracked items:', err);
@@ -1259,11 +1332,13 @@ async function activateBackoff() {
   const attempts = (await getStorageData(StorageKeys.CAPTCHA_BACKOFF_ATTEMPTS, StorageArea.LOCAL) || 0) + 1;
   const backoffMs = Math.min(BACKOFF_BASE_MS * (2 ** (attempts - 1)), BACKOFF_MAX_MS);
 
+  const backoffUntil = Date.now() + backoffMs;
   await setStorageItems({
     [StorageKeys.CAPTCHA_BACKOFF_ATTEMPTS]: attempts,
-    [StorageKeys.CAPTCHA_BACKOFF_UNTIL]: Date.now() + backoffMs
+    [StorageKeys.CAPTCHA_BACKOFF_UNTIL]: backoffUntil
   }, StorageArea.LOCAL);
   console.warn(`Scrape backoff active for ${Math.round(backoffMs / 60000)} minutes.`);
+  return backoffUntil;
 }
 
 async function clearBackoff() {

@@ -20,7 +20,7 @@ Important assets are the user's tracked products and wishlist URLs, price histor
 
 - Amazon page HTML, scraped titles, prices, images, wishlist metadata, URLs, imported JSON-like values, and runtime messages must be treated as untrusted input.
 - Extension pages and the service worker are privileged contexts. Data crossing from a content script or parsed Amazon document into these contexts must be validated and rendered safely.
-- Network access is limited to the Amazon host patterns declared in `manifest.json`. Redirects, derived product URLs, and pagination URLs must not expand that boundary.
+- Background product and wishlist fetches are limited to the Amazon host patterns declared in `manifest.json`. Redirects, derived product URLs, and pagination URLs must not expand that boundary. Dashboard product images use a separate exact HTTPS Amazon CDN host/path allowlist documented in `PRIVACY.md`.
 - Tracked items, histories, and operational scraper state remain in `chrome.storage.local`. Only lightweight preferences documented in `PRIVACY.md` use `chrome.storage.sync`.
 - Dependency and preview tooling are development-only and must not introduce remote executable code into extension pages.
 
@@ -31,8 +31,8 @@ Important assets are the user's tracked products and wishlist URLs, price histor
 - Product and wishlist fetches fail closed unless the destination hostname matches a supported Amazon regional domain.
 - User-controlled edits and removals, background price updates, and wishlist merges must not overwrite one another or resurrect deleted items.
 - Partial, failed, rate-limited, or interrupted wishlist pagination must never be treated as a complete list and must never trigger removal reconciliation.
-- Scraping remains bounded and serialized, respects persisted CAPTCHA/rate-limit backoff, and preserves resumable state across service-worker restarts.
-- Export is an explicit user action. Restore accepts only a validated, bounded backup from the top-level Options page, requires an expiring two-step confirmation, queues behind scrape work, keeps products due for fresh checks, and must preserve active anti-bot backoff. Clearing price history must require an in-context confirmation and must not delete tracked products.
+- Scraping remains bounded and serialized across scheduled and manual background paths, respects persisted CAPTCHA/rate-limit backoff, and preserves resumable state across service-worker restarts.
+- Export is an explicit user action. Restore accepts only a validated, bounded backup from the top-level Options page, requires an expiring two-step confirmation, queues behind scrape work, keeps products due for fresh checks, and must preserve active anti-bot backoff. Clearing price history must require an in-context confirmation, queue behind existing history producers, and must not delete tracked products.
 - Manifest permissions, icon paths, version metadata, and packaged files must be validated before release.
 
 ## Reportable findings and severity context

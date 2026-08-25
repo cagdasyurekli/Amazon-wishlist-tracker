@@ -1,6 +1,6 @@
 # Privacy Policy
 
-Last updated: 2026-08-24
+Last updated: 2026-08-25
 
 Amazon Wishlist Tracker is a browser extension that tracks Amazon products and wishlists without a developer-operated backend, analytics service, advertising service, or extension account.
 
@@ -10,7 +10,7 @@ The extension stores the following data in `chrome.storage.local` on the user's 
 
 - Product identifiers, titles, Amazon URLs, displayed images, current/original prices, currencies, availability, and wishlist price-drop metadata.
 - Wishlist identifiers and URLs selected by the user.
-- Price history, target prices, source membership, priority state, last/next check metadata, pagination checkpoints, and anti-bot backoff state.
+- Price history, target prices, source membership, priority state, last/next check metadata, pagination checkpoints, anti-bot backoff state, and an opaque local generation marker that prevents pre-clear/restore work from repopulating history.
 
 This data is not sent to the developer.
 
@@ -20,7 +20,7 @@ Lightweight global preferences use `chrome.storage.sync`, including the default 
 
 ## Network requests
 
-To perform its single purpose, the extension makes direct requests from the user's browser to the supported Amazon regional domains declared in `manifest.json`. Amazon receives those requests and may process network identifiers under Amazon's policies. The extension does not send tracked data to a developer server or unrelated third party.
+To perform its single purpose, the extension makes direct requests from the user's browser to the supported Amazon regional domains declared in `manifest.json`. The dashboard may also load a product image from an exact HTTPS Amazon image-CDN allowlist after the URL passes host and path validation. Amazon receives those marketplace and image requests and may process network identifiers under Amazon's policies. The extension does not send tracked data to a developer server or unrelated third party.
 
 The content script reads product and wishlist information already displayed on supported Amazon pages. Background requests do not intentionally attach Amazon session credentials.
 
@@ -34,7 +34,7 @@ Chrome notifications are generated locally when a configured price, discount, or
 
 ## Retention and deletion
 
-The selected history-retention setting removes expired price-history points during maintenance. Users can clear all price history from the options page without deleting tracked products. Individual products can be removed from the dashboard. Uninstalling the extension removes its Chrome-managed extension storage; previously downloaded JSON exports are separate files and must be deleted by the user.
+The selected history-retention setting removes expired price-history points during maintenance. Users can clear all price history from the options page without deleting tracked products. A confirmed clear waits behind previously started scrape/import work before deleting the history, while later tracking may record new samples. Individual products can be removed from the dashboard. Uninstalling the extension removes its Chrome-managed extension storage; previously downloaded JSON exports are separate files and must be deleted by the user.
 
 ## Permissions
 

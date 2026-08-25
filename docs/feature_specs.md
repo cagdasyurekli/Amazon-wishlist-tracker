@@ -1,7 +1,7 @@
 # Amazon Wishlist Tracker — Feature Specifications
 
 > **Source of Truth for Expected Behavior**
-> Last Updated: 2026-08-24
+> Last Updated: 2026-08-25
 
 This document defines the expected behavior of all features in the Amazon Wishlist Tracker extension. It serves as the single source of truth for QA, testing, and AI Agents to verify functionality.
 
@@ -23,6 +23,7 @@ This document defines the expected behavior of all features in the Amazon Wishli
 - **Fast Safe Continuation:** A scheduled wishlist traversal reads at most 8 pages per worker wake. If more pages remain, a one-shot continuation resumes after about 60 seconds instead of waiting for the next 15-minute rotation. The rotating cursor advances between chunks so one large list cannot starve another. Continuations survive service-worker restarts, respect CAPTCHA backoff, and never reconcile removals until the full traversal completes.
 - **Traversal Budgets:** A traversal is capped at 150 pages, 2,000 unique items, 32 MiB of HTML, six hours of resumable lifetime, and 12 MiB of persisted continuation state. Reaching a limit discards only the partial operational checkpoint; it never deletes tracked products or history.
 - **Manual Import Bounds:** Visible-tab extraction and dashboard bulk import accept at most 2,000 bounded products in one operation, while the durable tracked collection is capped at 5,000. The existing 50-item selection pages and whole-list “Select All” behavior remain available for ordinary large lists, including the 784-item regression fixture.
+- **Manual Background Coordination:** When no matching visible wishlist tab is available, Dashboard extraction is authorized only from the top-level Dashboard page and joins the same serialized scrape queue and persisted anti-bot backoff as scheduled checks. A partial set found before CAPTCHA/rate limiting may be reviewed non-destructively, but the UI must disclose the pause and its resume time.
 
 ### 1.3 Background Scraping Lifecycle
 - **Normal Checking:** Balanced Adaptive uses a one-shot `checkPricesAlarm`. It processes up to 8 due non-priority products sequentially, waits 1–2 seconds between requests, then schedules the next batch after at least 30 seconds. Unchecked products are immediately due.
@@ -98,8 +99,8 @@ This document defines the expected behavior of all features in the Amazon Wishli
   - Export a versioned JSON backup containing tracked products, price history, tracked wishlists, and supported preferences.
   - Select and validate backups under a 32 MiB file limit, preview product/history/wishlist counts, and require an expiring second confirmation before replacement.
   - Restore only canonical supported Amazon URLs and allowlisted record fields. The Options page validates first; the background worker independently validates again and accepts the mutation only from the top-level Options page.
-  - Queue restore behind in-flight scrape work, replace user-owned Local data under the tracked-item mutex, reset unfinished cursors while keeping imported products due for fresh checks, preserve active CAPTCHA/rate-limit backoff, and restore the exact prior Local snapshot if the Sync settings write fails.
-  - Clear all price history.
+  - Queue restore behind in-flight scrape work, replace user-owned Local data under the tracked-item mutex, reset unfinished cursors while keeping imported products due for fresh checks, invalidate pre-restore history writers, preserve active CAPTCHA/rate-limit backoff, and restore the exact prior Local snapshot if the Sync settings write fails.
+  - Clear all price history only after previously started scrape/import work has finished, so a pre-clear sample cannot reappear after the success message.
   - Explain that tracked items and price history stay on the device, lightweight preferences may use Chrome sync, backups contain shopping-interest data, restore replaces current local tracking data, and clearing history does not stop tracking.
   - Preserve an older currencyless global target until explicit acknowledgement. Offer a one-click copy only for a revalidated single-currency collection; otherwise direct the user to set per-product targets.
 
@@ -107,5 +108,5 @@ This document defines the expected behavior of all features in the Amazon Wishli
 
 ## 4. Privacy & Data Storage
 - **Local-Only:** All tracking data (`TRACKED_ITEMS`, `TRACKED_WISHLISTS`, `PRICE_HISTORY`) is saved strictly in `chrome.storage.local`.
-- **No Cloud:** There is no external backend, no analytics tracking, and no data leaves the user's browser except for direct requests to Amazon domains.
+- **No Developer Cloud:** There is no external backend or analytics tracking. Direct Amazon marketplace/image-CDN requests support product display and refreshes; lightweight preferences may also leave the device through Chrome Sync when the user enables it.
 - **Sync Storage:** Lightweight global preferences (dashboard sort/filter and default discount threshold) are stored in `chrome.storage.sync` to persist across the user's browser instances.

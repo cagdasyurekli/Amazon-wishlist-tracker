@@ -39,7 +39,7 @@ There is no production build step; Chrome executes the checked-in extension sour
 
 ## Development and verification
 
-Requirements: Node.js 20 or newer and a locally available Chrome/Chromium supported by Puppeteer.
+Requirements: Node.js 22.12 or newer and a locally available Chrome/Chromium supported by Puppeteer.
 
 ```bash
 npm ci

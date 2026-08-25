@@ -207,6 +207,7 @@ describe('Chrome extension E2E', () => {
       const responses = await Promise.all([
         chrome.runtime.sendMessage({
           type: 'BULK_ADD_TRACKED_ITEMS',
+          historyGeneration: 0,
           items: [{ id, currentPrice: 9, currency: '€', inStock: true }]
         }),
         chrome.runtime.sendMessage({
@@ -331,6 +332,7 @@ describe('Chrome extension E2E', () => {
 
       await chrome.runtime.sendMessage({
         type: 'BULK_ADD_TRACKED_ITEMS',
+        historyGeneration: 0,
         items: [{
           id: 'B012345678',
           title: 'Existing Wishlist Item',
@@ -669,7 +671,8 @@ describe('Chrome extension E2E', () => {
     await page.keyboard.press('Enter');
     await expect(page.$eval('#restore-btn', (node) => node.textContent)).resolves.toBe('Confirm Replace Local Data');
     await page.keyboard.press('Enter');
-    await expect(page.$eval('#restore-btn', (node) => node.disabled)).resolves.toBe(true);
+    // Do not require the transient disabled state: on fast Chrome versions the
+    // restore can finish between the key event and the next Puppeteer round trip.
     await page.waitForFunction(async () => {
       const status = document.querySelector('#settings-status');
       const { trackedItems } = await chrome.storage.local.get('trackedItems');
@@ -703,6 +706,8 @@ describe('Chrome extension E2E', () => {
     expect(restored.wishlist.url).toBe('https://www.amazon.com/hz/wishlist/ls/LIST-R');
     expect(restored.settings.defaultTargetPrice).toBeUndefined();
     await expect(page.$eval('#settings-status', (node) => node.textContent)).resolves.toContain('Backup restored');
+    await expect(page.$eval('#restore-btn', (node) => ({ hidden: node.hidden, disabled: node.disabled })))
+      .resolves.toEqual({ hidden: true, disabled: false });
   }, 60000);
 
   it('requires an expiring keyboard confirmation before clearing history and preserves tracked items', async () => {

@@ -269,10 +269,11 @@ in place.
 1. Select **Clear Price History**.
 2. While the button says **Confirm Clear History**, select it again.
 
-This deletes recorded price-history points but keeps tracked products. There is no undo
-inside the extension. Export first if you need a record. A background check that
-finishes later can record a new sample; clearing history does not pause tracking.
-A failed storage write leaves the button available for another attempt.
+This waits for any already-started scrape/import work, then deletes recorded price-history
+points while keeping tracked products. There is no undo inside the extension. Export first
+if you need a record. Checks that start after the clear can record new samples; clearing
+history does not pause tracking. A failed storage write leaves the button available for
+another attempt.
 
 ## 11. Privacy and permissions
 

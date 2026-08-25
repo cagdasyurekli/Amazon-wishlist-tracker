@@ -4,6 +4,24 @@ All notable changes to this project are documented here. Versions follow semanti
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-08-25
+
+### Changed
+
+- Raised the development and CI baseline to Node.js 22.12+, upgraded Puppeteer to 25.8.0, and moved the pinned checkout/setup-node actions to v7.
+- Manual background wishlist reads now share the same serialized queue, persisted anti-bot pause, and offscreen-parser cleanup as scheduled checks.
+- Price-history clearing now waits behind every already-started scrape or wishlist import that can append history.
+
+### Fixed
+
+- Partial manual wishlist results now preserve their safe items while disclosing CAPTCHA/rate-limit pause state and resume time.
+- Restore E2E coverage now verifies durable completion state instead of racing a transient disabled button.
+
+### Security
+
+- Dashboard-only wishlist extraction and Options-only history clearing are authorized at the service-worker boundary.
+- A confirmed history clear can no longer be followed by a stale sample from work that started before the clear.
+
 ## [1.2.0] - 2026-08-24
 
 ### Added

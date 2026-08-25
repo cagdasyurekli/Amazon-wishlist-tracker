@@ -12,10 +12,16 @@ async function loadBackground(initialItems = [], options = {}) {
   let currentSettings = { ...(options.settings || {}) };
   let settingsWriteCompleted = false;
   let messageListener;
+  let alarmListener;
   const savedItems = [];
   const notifications = [];
   const badgeTexts = [];
   const restoredBackups = [];
+  const localStorage = new Map(Object.entries(options.localStorage || {}));
+  let priceHistory = structuredClone(options.priceHistory || {});
+  localStorage.set('priceHistory', priceHistory);
+  let wishlistScrapeCalls = 0;
+  let offscreenCloseCalls = 0;
 
   const context = vm.createContext({
     URL,
@@ -42,7 +48,7 @@ async function loadBackground(initialItems = [], options = {}) {
         async create() {},
         async get(name) { return { name, periodInMinutes: name === 'checkPricesAlarm' ? null : 2 }; },
         async clear() {},
-        onAlarm: { addListener() {} }
+        onAlarm: { addListener(listener) { alarmListener = listener; } }
       },
       storage: { local: { async remove() {} }, onChanged: { addListener() {} } },
       notifications: {
@@ -62,8 +68,12 @@ async function loadBackground(initialItems = [], options = {}) {
     ['scrapeAmazonProduct', 'scrapeAmazonWishlist', 'closeOffscreenDocument'],
     function initialize() {
       this.setExport('scrapeAmazonProduct', async () => ({ success: false }));
-      this.setExport('scrapeAmazonWishlist', async () => ({ success: false }));
-      this.setExport('closeOffscreenDocument', async () => {});
+      this.setExport('scrapeAmazonWishlist', async (url) => {
+        wishlistScrapeCalls += 1;
+        if (options.scrapeAmazonWishlist) return options.scrapeAmazonWishlist(url);
+        return options.wishlistScrapeResult || { success: false };
+      });
+      this.setExport('closeOffscreenDocument', async () => { offscreenCloseCalls += 1; });
     },
     { context }
   );
@@ -90,6 +100,7 @@ async function loadBackground(initialItems = [], options = {}) {
     TRACKED_WISHLISTS: 'trackedWishlists',
     SETTINGS: 'settings',
     PRICE_HISTORY: 'priceHistory',
+    PRICE_HISTORY_GENERATION: 'priceHistoryGeneration',
     LAST_SCRAPE_TIME: 'lastScrapeTime',
     SCRAPE_CURSOR: 'scrapeCursor',
     PRIORITY_SCRAPE_CURSOR: 'priorityScrapeCursor',
@@ -103,7 +114,7 @@ async function loadBackground(initialItems = [], options = {}) {
   const storageModule = new vm.SyntheticModule(
     [
       'getTrackedItems', 'saveTrackedItem', 'updateTrackedItems', 'updateTrackedItemsIf', 'updateTrackedItemsWithFinalizer', 'updatePriceHistory', 'getStorageData',
-      'replaceTrackingData', 'setStorageData', 'setStorageItems', 'formatPrice', 'prunePriceHistory', 'StorageKeys', 'StorageArea'
+      'replaceTrackingData', 'clearPriceHistory', 'setStorageData', 'setStorageItems', 'formatPrice', 'prunePriceHistory', 'StorageKeys', 'StorageArea'
     ],
     function initialize() {
       this.setExport('getTrackedItems', async () => trackedItems);
@@ -134,7 +145,17 @@ async function loadBackground(initialItems = [], options = {}) {
           throw error;
         }
       });
-      this.setExport('updatePriceHistory', async (updater) => { updater({}); });
+      this.setExport('updatePriceHistory', async (updater) => {
+        priceHistory = updater(priceHistory);
+        localStorage.set(StorageKeys.PRICE_HISTORY, priceHistory);
+      });
+      this.setExport('clearPriceHistory', async () => {
+        const nextGeneration = (Number(localStorage.get(StorageKeys.PRICE_HISTORY_GENERATION)) || 0) + 1;
+        priceHistory = {};
+        localStorage.set(StorageKeys.PRICE_HISTORY, priceHistory);
+        localStorage.set(StorageKeys.PRICE_HISTORY_GENERATION, nextGeneration);
+        return nextGeneration;
+      });
       this.setExport('replaceTrackingData', async (backup) => {
         restoredBackups.push(backup);
         trackedItems = backup.items.map((entry) => ({ ...entry }));
@@ -147,6 +168,10 @@ async function loadBackground(initialItems = [], options = {}) {
           }
           return { ...currentSettings };
         }
+        if (area === StorageArea.LOCAL) {
+          const value = localStorage.get(key);
+          return value == null ? null : structuredClone(value);
+        }
         return null;
       });
       this.setExport('setStorageData', async (key, value, area) => {
@@ -154,11 +179,21 @@ async function loadBackground(initialItems = [], options = {}) {
           if (options.failSettingsWrite) throw new Error('Synthetic Sync write failure');
           currentSettings = { ...value };
           settingsWriteCompleted = true;
+          return;
         }
+        if (area === StorageArea.LOCAL) localStorage.set(key, value);
       });
-      this.setExport('setStorageItems', async () => {});
+      this.setExport('setStorageItems', async (values, area) => {
+        if (area !== StorageArea.LOCAL) return;
+        Object.entries(values).forEach(([key, value]) => {
+          localStorage.set(key, value);
+          if (key === StorageKeys.PRICE_HISTORY) priceHistory = value;
+        });
+      });
       this.setExport('formatPrice', (price, currency) => `${currency || ''}${price}`);
-      this.setExport('prunePriceHistory', async () => {});
+      this.setExport('prunePriceHistory', async () => {
+        if (options.prunePriceHistory) await options.prunePriceHistory();
+      });
       this.setExport('StorageKeys', StorageKeys);
       this.setExport('StorageArea', StorageArea);
     },
@@ -198,12 +233,17 @@ async function loadBackground(initialItems = [], options = {}) {
   return {
     api: module.namespace,
     sendMessage,
+    triggerAlarm: (name) => alarmListener({ name }),
     savedItems,
     notifications,
     badgeTexts,
     restoredBackups,
     getTrackedItems: () => trackedItems,
-    getSettings: () => currentSettings
+    getSettings: () => currentSettings,
+    getPriceHistory: () => priceHistory,
+    getLocalStorage: (key) => localStorage.get(key),
+    getWishlistScrapeCalls: () => wishlistScrapeCalls,
+    getOffscreenCloseCalls: () => offscreenCloseCalls
   };
 }
 
@@ -374,6 +414,166 @@ describe('backup restore privilege boundary', () => {
     assert.equal(response.success, true);
     assert.equal(harness.getTrackedItems()[0].id, 'B000000002');
   });
+
+  it('keeps retention pruning inside the queue before a later restore commits', async () => {
+    let releasePrune;
+    let markPruneStarted;
+    const pruneStarted = new Promise((resolve) => { markPruneStarted = resolve; });
+    const pruneBarrier = new Promise((resolve) => { releasePrune = resolve; });
+    const harness = await loadBackground([], {
+      prunePriceHistory: async () => {
+        markPruneStarted();
+        await pruneBarrier;
+      }
+    });
+    const backup = {
+      items: [item('B000000002')],
+      history: { B000000002: [{ price: 8, timestamp: 1 }] },
+      trackedWishlists: [],
+      settings: { historyRetentionDays: 'forever' },
+      summary: { itemCount: 1, historyPointCount: 1, wishlistCount: 0 }
+    };
+
+    const alarmRun = harness.triggerAlarm('checkPricesAlarm');
+    await pruneStarted;
+    const restoreResponse = harness.sendMessage({ type: 'RESTORE_BACKUP', backup }, optionsSender());
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(harness.restoredBackups.length, 0);
+
+    releasePrune();
+    await alarmRun;
+    assert.equal((await restoreResponse).success, true);
+    assert.equal(harness.restoredBackups.length, 1);
+    assert.equal(harness.getTrackedItems()[0].id, 'B000000002');
+  });
+});
+
+describe('manual wishlist scrape coordination', () => {
+  it('requires the Dashboard sender and makes no request during persisted backoff', async () => {
+    const backoffUntil = Date.now() + 60_000;
+    const harness = await loadBackground([], {
+      localStorage: { captchaBackoffUntil: backoffUntil }
+    });
+
+    const unauthorized = await harness.sendMessage(
+      { type: 'EXTRACT_WISHLIST', url: 'https://www.amazon.com/hz/wishlist/ls/LIST-A' },
+      optionsSender()
+    );
+    assert.match(unauthorized.error, /Unauthorized/i);
+
+    const paused = await harness.sendMessage(
+      { type: 'EXTRACT_WISHLIST', url: 'https://www.amazon.com/hz/wishlist/ls/LIST-A' },
+      dashboardSender()
+    );
+    assert.equal(paused.error, 'SCRAPE_BACKOFF_ACTIVE');
+    assert.equal(paused.paused, true);
+    assert.equal(paused.backoffUntil, backoffUntil);
+    assert.equal(harness.getWishlistScrapeCalls(), 0);
+    assert.equal(harness.getOffscreenCloseCalls(), 0);
+  });
+
+  it('waits for the shared queue, preserves partial items, activates backoff, and closes the parser', async () => {
+    const harness = await loadBackground([], {
+      wishlistScrapeResult: {
+        success: true,
+        complete: false,
+        error: 'RATE_LIMITED',
+        stopReason: 'RATE_LIMITED',
+        items: [item()]
+      }
+    });
+    let releaseHeldJob;
+    const heldJob = harness.api.enqueueScrapeJob(() => new Promise((resolve) => {
+      releaseHeldJob = resolve;
+    }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const responsePromise = harness.sendMessage(
+      { type: 'EXTRACT_WISHLIST', url: 'https://www.amazon.com/hz/wishlist/ls/LIST-A' },
+      dashboardSender()
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(harness.getWishlistScrapeCalls(), 0);
+
+    releaseHeldJob();
+    await heldJob;
+    const response = await responsePromise;
+    assert.equal(response.success, true);
+    assert.equal(response.paused, true);
+    assert.equal(response.error, 'RATE_LIMITED');
+    assert.equal(response.items[0].id, 'B000000001');
+    assert.equal(harness.getWishlistScrapeCalls(), 1);
+    assert.equal(harness.getOffscreenCloseCalls(), 1);
+    assert.equal(harness.getLocalStorage('captchaBackoffAttempts'), 1);
+    assert.ok(harness.getLocalStorage('captchaBackoffUntil') > Date.now());
+  });
+
+  it('clears an expired backoff attempt counter after a successful manual read', async () => {
+    const harness = await loadBackground([], {
+      localStorage: {
+        captchaBackoffUntil: Date.now() - 1000,
+        captchaBackoffAttempts: 2
+      },
+      wishlistScrapeResult: {
+        success: true,
+        complete: true,
+        items: [item()]
+      }
+    });
+
+    const response = await harness.sendMessage(
+      { type: 'EXTRACT_WISHLIST', url: 'https://www.amazon.com/hz/wishlist/ls/LIST-A' },
+      dashboardSender()
+    );
+
+    assert.equal(response.success, true);
+    assert.equal(harness.getLocalStorage('captchaBackoffAttempts'), 0);
+    assert.equal(harness.getLocalStorage('captchaBackoffUntil'), 0);
+    assert.equal(harness.getOffscreenCloseCalls(), 1);
+  });
+});
+
+describe('price history clear coordination', () => {
+  it('requires the Options page and waits behind in-flight history producers', async () => {
+    const originalHistory = { B000000001: [{ price: 20, timestamp: 1 }] };
+    const harness = await loadBackground([], { priceHistory: originalHistory });
+
+    const unauthorized = await harness.sendMessage({ type: 'CLEAR_PRICE_HISTORY' }, dashboardSender());
+    assert.match(unauthorized.error, /Unauthorized/i);
+    assert.deepEqual(harness.getPriceHistory(), originalHistory);
+
+    let releaseHeldJob;
+    const heldJob = harness.api.enqueueScrapeJob(() => new Promise((resolve) => {
+      releaseHeldJob = resolve;
+    }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const clearResponse = harness.sendMessage({ type: 'CLEAR_PRICE_HISTORY' }, optionsSender());
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.deepEqual(harness.getPriceHistory(), originalHistory);
+
+    releaseHeldJob();
+    await heldJob;
+    assert.equal((await clearResponse).success, true);
+    assert.equal(Object.keys(harness.getPriceHistory()).length, 0);
+    assert.equal(harness.getLocalStorage('priceHistoryGeneration'), 1);
+  });
+
+  it('does not append history from a wishlist read that predates the clear generation', async () => {
+    const harness = await loadBackground([], {
+      localStorage: { priceHistoryGeneration: 2 }
+    });
+
+    const response = await harness.sendMessage({
+      type: 'BULK_ADD_TRACKED_ITEMS',
+      items: [item()],
+      historyGeneration: 1
+    }, dashboardSender());
+
+    assert.equal(response.success, true);
+    assert.equal(Object.keys(harness.getPriceHistory()).length, 0);
+    assert.equal(harness.getTrackedItems()[0].id, 'B000000001');
+  });
 });
 
 describe('scraped purchase text handling', () => {
@@ -516,6 +716,7 @@ describe('bounded wishlist bulk import', () => {
     const harness = await loadBackground();
     const response = await harness.sendMessage({
       type: 'BULK_ADD_TRACKED_ITEMS',
+      historyGeneration: 0,
       items: [item('B000000001', {
         url: 'http://www.amazon.com/gp/product/B000000001?legacy=1',
         wishlistIds: ['LIST_1']
@@ -526,12 +727,14 @@ describe('bounded wishlist bulk import', () => {
     assert.equal(harness.getTrackedItems().length, 1);
     assert.equal(harness.getTrackedItems()[0].url, 'https://www.amazon.com/dp/B000000001');
     assert.deepEqual(Array.from(harness.getTrackedItems()[0].wishlistIds), ['LIST_1']);
+    assert.equal(harness.getPriceHistory().B000000001.length, 1);
   });
 
   it('accepts the popup auto-import dashboard URL while rejecting other extension pages', async () => {
     const harness = await loadBackground();
     const response = await harness.sendMessage({
       type: 'BULK_ADD_TRACKED_ITEMS',
+      historyGeneration: 0,
       items: [item()]
     }, dashboardSender({
       frameId: 0,

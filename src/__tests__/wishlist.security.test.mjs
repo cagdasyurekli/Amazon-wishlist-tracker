@@ -84,6 +84,7 @@ async function loadHarness({ storedState = {}, cursor = 0, scrapeResult, tracked
     TRACKED_WISHLISTS: 'trackedWishlists',
     SETTINGS: 'settings',
     PRICE_HISTORY: 'priceHistory',
+    PRICE_HISTORY_GENERATION: 'priceHistoryGeneration',
     LAST_SCRAPE_TIME: 'lastScrapeTime',
     SCRAPE_CURSOR: 'scrapeCursor',
     PRIORITY_SCRAPE_CURSOR: 'priorityScrapeCursor',
@@ -95,7 +96,7 @@ async function loadHarness({ storedState = {}, cursor = 0, scrapeResult, tracked
   };
   const StorageArea = { LOCAL: 'local', SYNC: 'sync' };
   const storageModule = new vm.SyntheticModule(
-    ['getTrackedItems', 'saveTrackedItem', 'updateTrackedItems', 'updateTrackedItemsIf', 'updateTrackedItemsWithFinalizer', 'replaceTrackingData', 'updatePriceHistory', 'getStorageData', 'setStorageData', 'setStorageItems', 'formatPrice', 'prunePriceHistory', 'StorageKeys', 'StorageArea'],
+    ['getTrackedItems', 'saveTrackedItem', 'updateTrackedItems', 'updateTrackedItemsIf', 'updateTrackedItemsWithFinalizer', 'replaceTrackingData', 'updatePriceHistory', 'clearPriceHistory', 'getStorageData', 'setStorageData', 'setStorageItems', 'formatPrice', 'prunePriceHistory', 'StorageKeys', 'StorageArea'],
     function initialize() {
       this.setExport('getTrackedItems', async () => storage.get('trackedItems') || []);
       this.setExport('saveTrackedItem', async () => {});
@@ -125,6 +126,7 @@ async function loadHarness({ storedState = {}, cursor = 0, scrapeResult, tracked
       this.setExport('updatePriceHistory', async (updater) => {
         storage.set('priceHistory', updater(storage.get('priceHistory') || {}));
       });
+      this.setExport('clearPriceHistory', async () => {});
       this.setExport('replaceTrackingData', async () => {});
       this.setExport('getStorageData', async (key) => storage.has(key) ? storage.get(key) : null);
       this.setExport('setStorageData', async (key, value) => { storage.set(key, value); });

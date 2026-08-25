@@ -18,6 +18,7 @@ export const StorageKeys = {
   
   // Local storage: heavy data (price history, scraping states)
   PRICE_HISTORY: 'priceHistory',
+  PRICE_HISTORY_GENERATION: 'priceHistoryGeneration',
   LAST_SCRAPE_TIME: 'lastScrapeTime',
   SCRAPE_CURSOR: 'scrapeCursor',
   PRIORITY_SCRAPE_CURSOR: 'priorityScrapeCursor',
@@ -215,6 +216,7 @@ export function replaceTrackingData(data) {
       StorageKeys.TRACKED_ITEMS,
       StorageKeys.TRACKED_WISHLISTS,
       StorageKeys.PRICE_HISTORY,
+      StorageKeys.PRICE_HISTORY_GENERATION,
       StorageKeys.LAST_SCRAPE_TIME,
       StorageKeys.SCRAPE_CURSOR,
       StorageKeys.PRIORITY_SCRAPE_CURSOR,
@@ -222,10 +224,12 @@ export function replaceTrackingData(data) {
       StorageKeys.WISHLIST_SCRAPE_STATE
     ];
     const previousLocal = await chrome.storage.local.get(localKeys);
+    const nextHistoryGeneration = (Number(previousLocal[StorageKeys.PRICE_HISTORY_GENERATION]) || 0) + 1;
     const nextLocal = {
       [StorageKeys.TRACKED_ITEMS]: data.items,
       [StorageKeys.TRACKED_WISHLISTS]: data.trackedWishlists,
       [StorageKeys.PRICE_HISTORY]: data.history,
+      [StorageKeys.PRICE_HISTORY_GENERATION]: nextHistoryGeneration,
       [StorageKeys.LAST_SCRAPE_TIME]: null,
       [StorageKeys.SCRAPE_CURSOR]: 0,
       [StorageKeys.PRIORITY_SCRAPE_CURSOR]: 0,
@@ -288,6 +292,25 @@ export function updatePriceHistory(updater) {
     const history = await getStorageData(StorageKeys.PRICE_HISTORY, StorageArea.LOCAL) || {};
     const next = updater(history);
     await setStorageData(StorageKeys.PRICE_HISTORY, next, StorageArea.LOCAL);
+  });
+}
+
+/**
+ * Clears price history and advances the writer generation in one locked Local
+ * write so delayed reads, pruning, and restore cannot repopulate the old state.
+ * @returns {Promise<number>} the generation established by this clear
+ */
+export function clearPriceHistory() {
+  return withSaveLock(async () => {
+    const currentGeneration = Number(
+      await getStorageData(StorageKeys.PRICE_HISTORY_GENERATION, StorageArea.LOCAL)
+    ) || 0;
+    const nextGeneration = currentGeneration + 1;
+    await setStorageItems({
+      [StorageKeys.PRICE_HISTORY]: {},
+      [StorageKeys.PRICE_HISTORY_GENERATION]: nextGeneration
+    }, StorageArea.LOCAL);
+    return nextGeneration;
   });
 }
 

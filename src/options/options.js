@@ -311,7 +311,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     clearTimeout(clearConfirmationTimer);
     clearHistoryBtn.disabled = true;
     try {
-      await setStorageData(StorageKeys.PRICE_HISTORY, {}, StorageArea.LOCAL);
+      const response = await sendBackgroundMessage({ type: 'CLEAR_PRICE_HISTORY' });
+      if (!response.success) throw new Error(response.error || 'History clear failed');
       clearHistoryBtn.classList.remove('confirming');
       clearHistoryBtn.textContent = 'Clear Price History';
       showStatus('Price history cleared. Price tracking continues.');
