@@ -6,8 +6,8 @@ Use this checklist on one stable candidate. A green local check does not authori
 
 - [x] Integrate the candidate into a real Git worktree and review the complete diff, including binary icon changes.
 - [x] Confirm `git diff --check` passes; the release validator runs this automatically in a Git worktree.
-- [x] Run `npm ci` from the lockfile on Node.js 22.12 or newer.
-- [x] Run `npm run release:check` with registry access and retain the terminal output. Required evidence is zero reported audit vulnerabilities, manifest/icon/metadata validation, 34 unit tests, 4 wishlist scraper contracts, 60 focused security tests, 1 real-Chrome intent test, 15 Chromium E2E tests, and the synthetic five-screenshot visual QA passing.
+- [x] Run `npm ci` from the lockfile on Node.js 22.13 or newer.
+- [x] Run `npm run release:check` with registry access and retain the terminal output. Required evidence is zero reported audit vulnerabilities, manifest/icon/metadata validation, 60 unit tests, 4 wishlist scraper contracts, 81 focused security tests, 1 real-Chrome intent test, 17 Chromium E2E tests, and the synthetic five-screenshot visual QA passing.
 - [x] Complete the independent security review on the same candidate and resolve or explicitly disposition every reportable finding. Do not infer acceptance from the automated test count.
 - [x] Confirm no credentials, exports, real wishlist data, browser profiles, `.agents/`, `.remember/`, or local editor settings are tracked.
 - [x] Read back `README.md`, `SECURITY.md`, `PRIVACY.md`, `CHANGELOG.md`, `CHROMEWEBSTORE.md`, and the license against actual runtime behavior.
@@ -27,9 +27,9 @@ Automated evidence covers the large-list, narrow-width, 200% zoom, accessible-na
 
 ## Version bump and stable-candidate rerun
 
-- [x] Change `manifest.json`, `package.json`, and `package-lock.json` from `1.2.0` to `1.2.1` together.
-- [x] Move the relevant `CHANGELOG.md` entries from **Unreleased** to a dated `1.2.1` section.
-- [ ] Run `npm run release:check` again after the final remote integration; retain the final same-candidate output.
+- [x] Change `manifest.json`, `package.json`, and `package-lock.json` from `1.2.1` to `1.3.0` together.
+- [x] Move the relevant `CHANGELOG.md` entries from **Unreleased** to a dated `1.3.0` section.
+- [x] Run `npm run release:check` again after the version bump on the final same-candidate tree; retain the output before push and tag creation.
 - [x] Load that exact directory as an unpacked extension in an isolated real-Chrome test profile and verify the extension ID, displayed version, toolbar icon, popup, dashboard, options, and background service worker.
 
 ## Public repository readiness

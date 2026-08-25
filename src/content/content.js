@@ -280,10 +280,7 @@ function extractWishlistItemsFromPage() {
       originalPrice = strikePrice;
     }
 
-    const itemText = text.toLowerCase();
-    const unavailable = itemText.includes('currently unavailable') ||
-      itemText.includes('no longer available') ||
-      itemText.includes('niet beschikbaar');
+    const unavailable = globalThis.AmazonAvailability.classifyAvailabilityText(text) === false;
 
     items.push({
       id: asin,

@@ -20,6 +20,8 @@ Severity legend: 🔴 critical (will break for real users / risk of ban) · 🟠
 - 🟡 **Legacy URL cleanup belongs at every navigation sink.** Old stored HTTP Amazon links may predate strict fetch validation. Bind the URL to the stored ASIN, upgrade only a valid supported Amazon product path to HTTPS, and suppress everything else before popup/dashboard/notification navigation.
 - 🟡 **Remote HTML parsing must remain resource-inert.** Neutralize scripts, frames, links, styles, and fetch-capable attributes before parsing, use a restrictive offscreen CSP, and keep only allowlisted HTTPS Amazon image URLs. Unknown image hosts should lose the image rather than the tracked product.
 - 🟡 **Legacy Sync cleanup is a verified migration.** Write tracked items locally, read back and compare the durable copy, then remove the Sync key. Residual cleanup must be idempotent, including when the valid local collection is an empty array.
+- 🟡 **Availability must fail safely across locales.** Normalize marketplace wording and test every supported locale; evaluate unavailable phrases before available phrases so a negative phrase containing a positive substring cannot produce a false in-stock result.
+- 🟡 **History compaction is data preservation, not deletion.** Keep recent raw samples, represent older windows with actual low/high timestamps, make compaction idempotent, and validate an export with the same restore contract before offering it for download.
 
 ---
 
@@ -211,7 +213,7 @@ Verified: all six tab contexts in the harness, add-flow state transition, 22/22 
 
 - 🟡 **Keep primary wishlist actions outside the product scroll region (Codex, FIXED).** Large wishlists can contain hundreds of tracked cards. The dashboard should keep header controls and the footer action bar visible while only the product list scrolls, so actions like `Sync Wishlist Now` do not require scrolling to the bottom of the page.
 
-- 🟡 **Price charts must expose timestamp and value context (Codex, FIXED).** A sparkline without fetch timestamps or price labels is not trustworthy for a tracker. Dashboard chart cards now show latest fetched price/time, low/high prices, fetch count, start/end timestamp labels, and recent timestamp/price sample rows. Render canvases only after the chart is visible/attached; hidden or detached canvases measure as 0px and produce blank stretched charts. Flat histories (same price across fetches) still need a centered line plus explicit sample rows.
+- 🟡 **Price charts must expose timestamp and value context (Codex, FIXED).** A sparkline without sample timestamps or price labels is not trustworthy for a tracker. Dashboard chart cards show the latest stored price/time, low/high prices, stored-sample count, start/end timestamp labels, and recent timestamp/price sample rows. Render canvases only after the chart is visible/attached; hidden or detached canvases measure as 0px and produce blank stretched charts. Flat histories (same price across samples) still need a centered line plus explicit sample rows.
 
 - 🟡 **Large tracked lists need filter-first navigation (Codex, FIXED).** With hundreds of products, users should not rely on scroll alone. Keep dashboard search visible in the header, show filtered counts (`N of total`), and debounce search input so storage reads/renders do not fire on every keystroke.
 
@@ -230,6 +232,7 @@ Verified: all six tab contexts in the harness, add-flow state transition, 22/22 
 - 🟠 **Null price history/alerts (Codex, FIXED).** `processScrapeResult` now skips price history and price-based alerts when `result.price == null`, while still recording stock/check metadata.
 
 - 🔴 **First-run discount and target alerts silently skipped (FIXED).** The guard `previousPrice > currentPrice` silently skipped alerts when `previousPrice` was `null` (the very first run). If a user imported a wishlist of already-discounted items, they never received an alert. **Fix:** Changed the guard to `(previousPrice == null || previousPrice > currentPrice)` so that the very first successful check correctly fires alerts if thresholds are already met.
+- 🟡 **First-check alert policy was later tightened intentionally.** The product contract now treats the first successful price as a baseline and suppresses target and discount notifications until a later downward move. Keep the regression test and feature specification aligned with this deliberate anti-noise behavior; do not reintroduce the earlier `previousPrice == null` alert path as an incidental cleanup.
 
 - 🔴 **Badge discount logic ignored native wishlist drops (FIXED).** The badge logic previously manually calculated discounts using `(original - current) / original`. However, items imported from wishlists sometimes only expose `wishlistPriceDropPercent` and not a raw original price. **Fix:** Badge calculation and popup alerts now fall back to reading `wishlistPriceDropPercent` if a manual calculation yields 0 or fails.
 

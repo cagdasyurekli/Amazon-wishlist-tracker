@@ -87,6 +87,11 @@ check records a sample.
 4. Wait for the inline success message. The popup remains the source of truth for
    whether the request succeeded or the item was already tracked.
 
+Popup highlight changes use the price captured when tracking started. History retention
+and low/high compaction do not change that baseline. For legacy records where the start
+sample is no longer recoverable, the popup explicitly says it is using the earliest
+retained sample.
+
 ### From the Amazon page
 
 1. Open a supported product detail page.
@@ -119,6 +124,11 @@ products and stop tracking products removed from that wishlist. A product is pre
 when it is also tracked individually or belongs to another tracked wishlist. Partial or
 interrupted wishlist scans do not remove missing products.
 
+Each product keeps its own Amazon marketplace link. After an update, an older wishlist
+record whose marketplace cannot be determined is shown for region review and will not
+sync automatically. Import that wishlist again using its real Amazon URL to resolve it;
+the extension never assumes a different marketplace such as `amazon.com`.
+
 To refresh a wishlist manually, keep its Amazon tab open, open the dashboard, and
 select **Sync Wishlist Now**. The button reports reading, product-count, saving, and
 success or failure states. Reload the Amazon tab if the dashboard says it cannot read
@@ -137,6 +147,8 @@ popup.
   Discount %. The selection is remembered as a lightweight Chrome preference.
 - **Filter** supports All items, Price drops, Priority, Out of stock, Target reached,
   and Not checked yet.
+- A target-reached link from the popup opens a temporary **Target reached** view. It
+  does not replace your saved filter unless you choose another filter yourself.
 - Large result sets render 50 products at a time. Select **Load More** to see the next
   group without intentionally returning to the top.
 
@@ -147,6 +159,11 @@ popup.
   information, and timestamped history.
 - Select **History** for one product or **Expand Visible Histories** for all currently
   rendered products.
+- Press **Escape** to return from product details or wishlist selection; focus returns
+  to the control you used to open that view.
+- Price numbers follow your browser language where possible while retaining the
+  marketplace's stored currency symbol. History point counts are stored samples, not
+  a count of every check made.
 - Read **Last checked**, **Next check**, and the next-check summary as scheduling
   information, not a guaranteed wall-clock promise.
 
@@ -213,6 +230,10 @@ Chrome notifications can report:
   paused and must be reviewed in **Extension Settings**.
 
 Repeated checks do not intentionally send the same unchanged threshold alert.
+The first successful price check records a baseline without alerting, even when a
+configured price or discount target is already met. Price and discount alerts require
+a later downward move; restock alerts require a later out-of-stock to in-stock
+transition.
 Selecting a price, discount, or restock notification opens the tracked Amazon
 product. Selecting the previous-target upgrade notice opens **Extension
 Settings** instead.
@@ -236,14 +257,20 @@ does not have a more specific value. Clear the field to remove the default.
 
 Choose 30 Days, 90 Days, 1 Year, or Forever. Cleanup occurs during later background
 maintenance; changing the setting is not a promise that every expired point disappears
-immediately.
+immediately. To keep backup size practical, the newest seven days retain their recorded
+detail, older retained history is summarized as daily low/high samples through one year,
+then monthly low/high samples. Each product is capped at 10,000 stored samples, and an
+export is capped at 500,000 samples across products before the 32 MB file check.
 
 ### Export Data (JSON)
 
 Select **Export Data (JSON)** to download `saved_signal_backup.json`. It contains the
 tracked product records, price history, tracked wishlists, supported preferences, and
-export time. Treat the file as private: it can contain product titles, URLs, targets,
-and shopping-interest history.
+export time. The current backup format is version 2; it records history compaction and
+preserves any wishlist region still awaiting review. The extension validates the export
+before downloading it and refuses files over 32 MB. If older high-frequency samples are
+condensed for export, the completion message says so. Treat the file as private: it can
+contain product titles, URLs, targets, and shopping-interest history.
 
 ### Restore a backup
 
@@ -259,6 +286,10 @@ check cursors so new checks start from a consistent state. The file is validated
 before confirmation and again by the background worker. Unsupported hosts, mismatched
 product identities, malformed values, excessive collections, and unknown fields are
 not imported. Restore never changes an Amazon account or wishlist.
+
+Version 1 and older unversioned backups that pass validation are still accepted. A
+wishlist region that cannot safely be recovered remains marked for review rather than
+being assigned to another Amazon marketplace.
 
 There is no in-product undo after a successful restore. Export the current data first
 if you may need it later. A rejected or failed restore leaves the previous local data

@@ -1,5 +1,6 @@
-import { getTrackedItems, getStorageData, setStorageData, formatPrice, StorageKeys, StorageArea } from '../utils/storage.js';
+import { getTrackedItems, getStorageData, formatPrice, StorageKeys, StorageArea } from '../utils/storage.js';
 import {
+  getAmazonAsin,
   getAmazonWishlistId,
   normalizeStoredAmazonProductUrl,
   parseCanonicalAmazonProductUrl,
@@ -45,13 +46,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (!response.success) throw new Error(response.error || 'Failed to remove item');
   }
 
-  function showStatus(message, type = 'info') {
+  function showStatus(message, type = 'info', persistent = false) {
     if (!statusBanner) return;
     statusBanner.textContent = message;
     statusBanner.className = `status-banner status-${type} visible`;
     statusBanner.setAttribute('role', type === 'error' ? 'alert' : 'status');
     clearTimeout(statusTimer);
-    if (type !== 'error') {
+    if (type !== 'error' && !persistent) {
       statusTimer = setTimeout(() => {
         statusBanner.classList.remove('visible');
       }, 4000);
@@ -230,9 +231,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   });
   async function saveDashboardPreference(key, value) {
-    const latestSettings = await getStorageData(StorageKeys.SETTINGS, StorageArea.SYNC) || {};
-    settings = { ...latestSettings, [key]: value };
-    await setStorageData(StorageKeys.SETTINGS, settings, StorageArea.SYNC);
+    const response = await sendBackgroundMessage({ type: 'PATCH_SETTINGS', set: { [key]: value } });
+    if (!response.success || !response.settings) {
+      throw new Error(response.error || 'Failed to save dashboard preference');
+    }
+    settings = response.settings;
   }
   if (sortSelect && settings.dashboardSort) {
     const savedSortExists = Array.from(sortSelect.options).some(option => option.value === settings.dashboardSort);
@@ -243,6 +246,31 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (filterSelect && settings.dashboardFilter) {
     const savedFilterExists = Array.from(filterSelect.options).some(option => option.value === settings.dashboardFilter);
     if (savedFilterExists) filterSelect.value = settings.dashboardFilter;
+  }
+  const startupParams = new URLSearchParams(window.location.search);
+  const requestedFilter = startupParams.get('filter');
+  if (filterSelect && requestedFilter) {
+    const allowedFilter = Array.from(filterSelect.options).some(option => option.value === requestedFilter);
+    if (allowedFilter) filterSelect.value = requestedFilter;
+  }
+
+  const initialWishlists = await getStorageData(StorageKeys.TRACKED_WISHLISTS, StorageArea.LOCAL) || [];
+  let regionWishlists = initialWishlists;
+  if (initialWishlists.some((entry) => typeof entry === 'string')) {
+    const migrationResponse = await sendBackgroundMessage({ type: 'MIGRATE_LEGACY_WISHLISTS' });
+    if (!migrationResponse.success) {
+      showStatus('Legacy wishlist regions could not be checked. Automatic sync remains paused for them.', 'error');
+    } else {
+      regionWishlists = migrationResponse.wishlists || [];
+    }
+  }
+  const unresolvedCount = regionWishlists.filter((entry) => entry?.needsRegionReview).length;
+  if (unresolvedCount > 0) {
+    showStatus(
+      `${unresolvedCount} legacy wishlist${unresolvedCount === 1 ? ' needs' : 's need'} the original Amazon URL before automatic sync can resume.`,
+      'info',
+      true
+    );
   }
 
   const toggleAllChartsBtn = document.getElementById('toggle-all-charts-btn');
@@ -274,8 +302,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const trackedWishlists = await getStorageData(StorageKeys.TRACKED_WISHLISTS, StorageArea.LOCAL) || [];
 
     if (isAmazonProduct) {
-      const asinMatch = activeTab.url.match(/\/(?:dp|gp\/product)\/([a-zA-Z0-9]{10})/);
-      const asin = asinMatch ? asinMatch[1] : null;
+      const asin = getAmazonAsin(activeProductUrl.href);
       
       if (asin && items.some(item => item.id === asin)) {
         addBtn.style.display = 'none';
@@ -400,6 +427,18 @@ document.addEventListener('DOMContentLoaded', async () => {
     mainView.hidden = false;
     requestAnimationFrame(() => viewReturnFocus?.focus());
   }
+
+  document.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape') return;
+    if (!detailsView.hidden) {
+      event.preventDefault();
+      closeSecondaryView(detailsView);
+    } else if (!selectionView.hidden) {
+      event.preventDefault();
+      clearSelectionStatus();
+      closeSecondaryView(selectionView);
+    }
+  });
 
   function getWishlistId(url) {
     return getAmazonWishlistId(url);
@@ -630,7 +669,12 @@ document.addEventListener('DOMContentLoaded', async () => {
         showStatus('Wishlist sync failed while saving items.', 'error');
         return;
       }
+      const wishlistResponse = await sendBackgroundMessage({ type: 'UPSERT_TRACKED_WISHLIST', url });
       await renderItems();
+      if (!wishlistResponse.success) {
+        showStatus('Products synced, but the wishlist region setting could not be saved. Re-enter the wishlist URL to retry.', 'error');
+        return;
+      }
       showStatus(
         response.paused
           ? `${response.items.length} products found before Amazon paused background reads were refreshed. Wait for the pause to end before syncing again.`
@@ -715,29 +759,23 @@ document.addEventListener('DOMContentLoaded', async () => {
         const autoSyncCheckbox = document.getElementById('auto-sync-checkbox');
         const isAutoSync = autoSyncCheckbox ? autoSyncCheckbox.checked : false;
 
-        if (currentWishlistUrl) {
-          const wishlistIdMatch = currentWishlistUrl.match(/wishlist\/ls\/([a-zA-Z0-9]+)/);
-          const wishlistId = wishlistIdMatch ? wishlistIdMatch[1] : null;
-          if (wishlistId) {
-            let trackedWishlists = await getStorageData(StorageKeys.TRACKED_WISHLISTS, StorageArea.LOCAL) || [];
-            trackedWishlists = trackedWishlists.map(w => typeof w === 'string' ? { id: w, url: `https://www.amazon.com/hz/wishlist/ls/${w}` } : w);
-            
-            const existingList = trackedWishlists.find(w => w.id === wishlistId);
-            if (existingList) {
-              existingList.autoSync = isAutoSync;
-              if (!existingList.url) existingList.url = currentWishlistUrl;
-            } else {
-              trackedWishlists.push({ id: wishlistId, url: currentWishlistUrl, autoSync: isAutoSync });
-            }
-            await setStorageData(StorageKeys.TRACKED_WISHLISTS, trackedWishlists, StorageArea.LOCAL);
-          }
-        }
+        const wishlistResponse = currentWishlistUrl
+          ? await sendBackgroundMessage({
+              type: 'UPSERT_TRACKED_WISHLIST',
+              url: currentWishlistUrl,
+              autoSync: isAutoSync
+            })
+          : { success: true };
 
         wishlistInput.value = '';
         clearSelectionStatus();
         closeSecondaryView(selectionView);
         await renderItems();
-        showStatus(`${selectedItems.length} product${selectedItems.length === 1 ? '' : 's'} added.`, 'success');
+        if (!wishlistResponse.success) {
+          showStatus(`${selectedItems.length} product${selectedItems.length === 1 ? '' : 's'} added, but the wishlist region setting could not be saved.`, 'error');
+        } else {
+          showStatus(`${selectedItems.length} product${selectedItems.length === 1 ? '' : 's'} added.`, 'success');
+        }
       }
     });
   });
@@ -782,6 +820,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
   if (filterSelect) {
     filterSelect.addEventListener('change', async () => {
+      const currentUrl = new URL(window.location.href);
+      if (currentUrl.searchParams.has('filter')) {
+        currentUrl.searchParams.delete('filter');
+        window.history.replaceState(null, '', `${currentUrl.pathname}${currentUrl.search}${currentUrl.hash}`);
+      }
       visibleItemLimit = PAGE_SIZE;
       if (itemList) itemList.scrollTop = 0;
       renderItems();
@@ -820,15 +863,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       mainTitle.textContent = `Tracked Items (${items.length})`;
     }
 
-    // Infer regional domain from tracked wishlists for legacy items saved with .com
-    let preferredDomain = 'www.amazon.com';
     const trackedWishlists = await getStorageData(StorageKeys.TRACKED_WISHLISTS, StorageArea.LOCAL) || [];
-    if (trackedWishlists.length > 0) {
-      const wlUrl = typeof trackedWishlists[0] === 'string' ? '' : trackedWishlists[0].url;
-      if (wlUrl) {
-        try { preferredDomain = new URL(wlUrl).hostname; } catch(e) {}
-      }
-    }
 
     if (items.length === 0) {
       setEmptyState(
@@ -954,12 +989,20 @@ document.addEventListener('DOMContentLoaded', async () => {
         imgEl.style.display = 'block';
       }
       
-      // Fix legacy items that were hardcoded to amazon.com before the regional fix
-      let productUrl = normalizeStoredAmazonProductUrl(item.url, item.id) || `https://${preferredDomain}/dp/${item.id}`;
-      if (productUrl.includes('www.amazon.com') && preferredDomain !== 'www.amazon.com') {
-        productUrl = productUrl.replace('www.amazon.com', preferredDomain);
+      const storedProductUrl = normalizeStoredAmazonProductUrl(item.url, item.id);
+      const associatedOrigins = new Set((item.wishlistIds || []).flatMap((wishlistId) => {
+        const wishlist = trackedWishlists.find((entry) => typeof entry !== 'string' && entry?.id === wishlistId);
+        const parsedWishlist = parseCanonicalAmazonWishlistUrl(wishlist?.url || '');
+        return parsedWishlist ? [parsedWishlist.origin] : [];
+      }));
+      const fallbackOrigin = associatedOrigins.size === 1 ? [...associatedOrigins][0] : null;
+      const productUrl = storedProductUrl || (fallbackOrigin ? `${fallbackOrigin}/dp/${item.id}` : null);
+      if (productUrl) {
+        titleEl.href = productUrl;
+      } else {
+        titleEl.removeAttribute('href');
+        titleEl.title = 'Amazon region unknown. Re-import the source wishlist to restore this link.';
       }
-      titleEl.href = normalizeStoredAmazonProductUrl(productUrl, item.id) || '#';
       
       clone.querySelector('.item-price').textContent = formatPrice(item.currentPrice, item.currency);
 
@@ -1189,8 +1232,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   await renderItems();
 
   // Auto-trigger import if launched with ?import=URL
-  const urlParams = new URLSearchParams(window.location.search);
-  const importUrl = urlParams.get('import');
+  const importUrl = startupParams.get('import');
   if (importUrl) {
     wishlistInput.value = importUrl;
     importWishlistHandler(importUrl, importBtn);
@@ -1243,7 +1285,7 @@ function renderChartMeta(container, dataPoints, currency) {
     `Latest ${formatPrice(latest.price, currency)} · ${formatTimestamp(latest.timestamp)}`,
     `Low ${formatPrice(Math.min(...prices), currency)}`,
     `High ${formatPrice(Math.max(...prices), currency)}`,
-    `${validPoints.length} fetch${validPoints.length === 1 ? '' : 'es'}`
+    `${validPoints.length} stored sample${validPoints.length === 1 ? '' : 's'}`
   ].forEach((text) => {
     const chip = document.createElement('span');
     chip.textContent = text;

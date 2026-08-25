@@ -4,6 +4,35 @@ All notable changes to this project are documented here. Versions follow semanti
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-08-26
+
+### Added
+
+- Regional English, Dutch, German, French, Spanish, and Italian availability classification shared by visible-page and offscreen parsing.
+- Bounded price-history compaction with seven days of raw samples, daily low/high samples through one year, monthly low/high samples thereafter, and a durable tracking-start baseline.
+- Backup format v2 with compaction metadata, unresolved wishlist-region state, restore-validator parity, a 32 MiB limit, and Blob URL downloads while retaining v1 and unversioned restore support.
+- Sender-scoped `PATCH_SETTINGS` updates, locale-aware price formatting, Escape/focus restoration, a temporary target-reached dashboard filter, and correctness-focused ESLint gating.
+
+### Changed
+
+- Product and wishlist identity now use canonical Amazon helpers and preserve each supported regional origin instead of rewriting URLs through the first wishlist domain.
+- Options, Dashboard, restore, legacy settings migration, and wishlist mutations now pass through serialized background/storage boundaries that preserve concurrent edits.
+- Retained chart counts describe stored samples, and popup price-change copy distinguishes an exact tracking-start baseline from the earliest retained legacy sample.
+- The local development baseline is Node.js 22.13 or newer.
+
+### Fixed
+
+- Negative availability phrases take precedence over misleading positive substrings across supported locales.
+- Ambiguous legacy wishlist regions remain fail-closed without guessing `.com`, visibly request review, and resume automatic sync only after the real URL is supplied.
+- First successful checks establish alert state without notifying when a target was already met.
+- Temporary dashboard filter links no longer overwrite or reapply after the user chooses a persistent filter.
+
+### Security
+
+- Backup export is validated through the same canonical restore boundary and bounded before download.
+- Settings and wishlist mutation messages enforce top-level page ownership and field/value allowlists.
+- Amazon permissions, network destinations, and storage areas remain unchanged.
+
 ## [1.2.1] - 2026-08-25
 
 ### Changed

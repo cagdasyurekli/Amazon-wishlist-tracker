@@ -1,5 +1,5 @@
-import { getStorageData, setStorageData, getTrackedItems, StorageKeys, StorageArea } from '../utils/storage.js';
-import { createBackupPayload, validateBackupPayload, MAX_BACKUP_BYTES } from '../utils/backup.js';
+import { getStorageData, getTrackedItems, StorageKeys, StorageArea } from '../utils/storage.js';
+import { createBackupBlob, createBackupPayload, validateBackupPayload, MAX_BACKUP_BYTES } from '../utils/backup.js';
 
 document.addEventListener('DOMContentLoaded', async () => {
   const discountInput = document.getElementById('default-discount');
@@ -46,13 +46,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   }
 
-  async function updateSettings(mutator, failureMessage = 'Could not save settings. Try again.') {
+  async function updateSettings(patch, failureMessage = 'Could not save settings. Try again.') {
     try {
-      const latestSettings = await getStorageData(StorageKeys.SETTINGS) || {};
-      const nextSettings = { ...latestSettings };
-      mutator(nextSettings);
-      await setStorageData(StorageKeys.SETTINGS, nextSettings);
-      settings = nextSettings;
+      const response = await sendBackgroundMessage({ type: 'PATCH_SETTINGS', ...patch });
+      if (!response.success || !response.settings) {
+        throw new Error(response.error || 'Failed to update settings');
+      }
+      settings = response.settings;
       return true;
     } catch (_error) {
       showStatus(failureMessage, 'error');
@@ -140,7 +140,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   discountInput.addEventListener('change', async (e) => {
     const value = parseInt(e.target.value, 10);
     if (e.target.value === '') {
-      if (await updateSettings((next) => delete next.defaultDiscount)) {
+      if (await updateSettings({ remove: ['defaultDiscount'] })) {
         e.target.removeAttribute('aria-invalid');
         showStatus('Default discount cleared.');
       }
@@ -151,14 +151,14 @@ document.addEventListener('DOMContentLoaded', async () => {
       showStatus('Enter a discount from 1 to 99.', 'error');
       return;
     }
-    if (await updateSettings((next) => { next.defaultDiscount = value; })) {
+    if (await updateSettings({ set: { defaultDiscount: value } })) {
       e.target.removeAttribute('aria-invalid');
       showStatus('Default discount saved.');
     }
   });
 
   retentionSelect.addEventListener('change', async (e) => {
-    if (await updateSettings((next) => { next.historyRetentionDays = e.target.value; })) {
+    if (await updateSettings({ set: { historyRetentionDays: e.target.value } })) {
       showStatus('History retention saved.');
     }
   });
@@ -178,7 +178,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (!response.success || response.updated !== expectedCount) {
         throw new Error(response.error || 'Failed to copy legacy target price');
       }
-      settings = await getStorageData(StorageKeys.SETTINGS) || {};
+      settings = response.settings || settings;
       hideLegacyTargetMigration();
       showStatus(`Legacy target copied to ${response.updated} product${response.updated === 1 ? '' : 's'}.`);
     } catch (_error) {
@@ -194,7 +194,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       const targetPrice = Number(settings.defaultTargetPrice);
       const response = await sendBackgroundMessage({ type: 'ACKNOWLEDGE_LEGACY_TARGET_PRICE', targetPrice });
       if (!response.success) throw new Error(response.error || 'Failed to acknowledge legacy target');
-      settings = await getStorageData(StorageKeys.SETTINGS) || {};
+      settings = response.settings || settings;
       hideLegacyTargetMigration();
       showStatus('Legacy target acknowledged. Existing product targets were not changed.');
     } catch (_error) {
@@ -220,16 +220,20 @@ document.addEventListener('DOMContentLoaded', async () => {
         trackedWishlists: trackedWishlists || [],
         settings: latestSettings || {}
       });
-      const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(exportObj, null, 2));
+      const backupBlob = createBackupBlob(exportObj);
+      const objectUrl = URL.createObjectURL(backupBlob);
       const downloadAnchor = document.createElement('a');
-      downloadAnchor.setAttribute('href', dataStr);
+      downloadAnchor.setAttribute('href', objectUrl);
       downloadAnchor.setAttribute('download', 'saved_signal_backup.json');
       document.body.appendChild(downloadAnchor);
       downloadAnchor.click();
       downloadAnchor.remove();
-      showStatus('Export downloaded.');
+      setTimeout(() => URL.revokeObjectURL(objectUrl), 0);
+      showStatus(exportObj.historyPolicy.compacted
+        ? 'Export downloaded. Older high-frequency samples were condensed.'
+        : 'Export downloaded.');
     } catch (error) {
-      showStatus('Could not export your data. Try again.', 'error');
+      showStatus(error.message || 'Could not export your data. Try again.', 'error');
     } finally {
       exportBtn.disabled = false;
     }
@@ -282,7 +286,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         backup: restoreCandidate
       });
       if (!response.success) throw new Error(response.error || 'Restore failed');
-      const restoredSettings = { ...restoreCandidate.settings };
+      const restoredSettings = response.settings || { ...restoreCandidate.settings };
       resetRestoreSelection();
       renderRestoredSettings(restoredSettings);
       showStatus(`Backup restored: ${response.summary.itemCount} product${response.summary.itemCount === 1 ? '' : 's'}.`);

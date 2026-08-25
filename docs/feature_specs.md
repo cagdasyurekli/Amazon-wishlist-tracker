@@ -13,6 +13,7 @@ This document defines the expected behavior of all features in the Amazon Wishli
 - **Current Tab Tracking:** Users can track the current Amazon product tab directly from the extension popup.
 - **Validation:** The extension must validate that the URL matches an allowed Amazon regional domain (`.com`, `.nl`, `.de`, `.fr`, `.es`, `.it`, `.co.uk`).
 - **Data Extracted:** The extension extracts the product ID (ASIN), title, current price, original price (if available), currency symbol, stock status, and product image.
+- **Availability Classification:** Stock and wishlist-unavailable text is normalized and classified with unavailable wording taking precedence over available wording. English, Dutch, German, French, Spanish, and Italian marketplace phrases are supported. Unrecognized product availability is not treated as verified in stock; wishlist rows retain their existing fallback unless an unavailable phrase is present.
 
 ### 1.2 Wishlist Tracking & Syncing
 - **Import Flow:** Users can import a public/shared Amazon wishlist URL via the Dashboard or the Popup.
@@ -24,6 +25,7 @@ This document defines the expected behavior of all features in the Amazon Wishli
 - **Traversal Budgets:** A traversal is capped at 150 pages, 2,000 unique items, 32 MiB of HTML, six hours of resumable lifetime, and 12 MiB of persisted continuation state. Reaching a limit discards only the partial operational checkpoint; it never deletes tracked products or history.
 - **Manual Import Bounds:** Visible-tab extraction and dashboard bulk import accept at most 2,000 bounded products in one operation, while the durable tracked collection is capped at 5,000. The existing 50-item selection pages and whole-list “Select All” behavior remain available for ordinary large lists, including the 784-item regression fixture.
 - **Manual Background Coordination:** When no matching visible wishlist tab is available, Dashboard extraction is authorized only from the top-level Dashboard page and joins the same serialized scrape queue and persisted anti-bot backoff as scheduled checks. A partial set found before CAPTCHA/rate limiting may be reviewed non-destructively, but the UI must disclose the pause and its resume time.
+- **Regional Identity:** A valid stored product URL keeps its own supported Amazon origin. Legacy wishlist records are upgraded only when their linked products establish one unambiguous Amazon origin. A region that cannot be resolved is marked for review, is excluded from automatic sync, and is resolved when the user imports the real wishlist URL again; the extension must not guess `.com`.
 
 ### 1.3 Background Scraping Lifecycle
 - **Normal Checking:** Balanced Adaptive uses a one-shot `checkPricesAlarm`. It processes up to 8 due non-priority products sequentially, waits 1–2 seconds between requests, then schedules the next batch after at least 30 seconds. Unchecked products are immediately due.
@@ -43,10 +45,12 @@ This document defines the expected behavior of all features in the Amazon Wishli
 ### 2.1 Target Price Alerts
 - **Behavior:** Fires when an item's price drops to or below the user-defined `targetPrice`.
 - **Anti-Spam:** Only fires on a downward transition. If the price remains below the target on subsequent checks, no duplicate alert is sent.
+- **First Check:** The first successful price check records the baseline without alerting, even when the target is already met. A later downward crossing is required.
 
 ### 2.2 Target Discount Alerts
 - **Behavior:** Fires when the discount (calculated against `originalPrice`, or via native `wishlistPriceDropPercent`) reaches or exceeds the `targetDiscountPercentage`.
 - **Anti-Spam:** Only fires when crossing the threshold downward, or if the price drops *even further* after already crossing the threshold.
+- **First Check:** The first successful price check records the baseline without alerting, even when the discount threshold is already met.
 
 ### 2.3 Restock Alerts
 - **Behavior:** Fires when an item transitions strictly from "Out of Stock" to "In Stock".
@@ -71,7 +75,9 @@ This document defines the expected behavior of all features in the Amazon Wishli
 - **Features:** 
   - Shows context-aware tracking buttons (e.g., "Track This Product" if on an untracked Amazon page).
   - Displays 3 compact highlights, prioritizing meaningful price drops and then recently updated products.
-  - Shows current price and a green drop/red rise badge when the change from the first recorded price is at least 0.5%.
+  - Shows current price and a green drop/red rise badge when the change from the durable tracking-start price is at least 0.5%. The baseline is captured before retention or low/high compaction can remove the original history sample and is preserved by backup v2.
+  - Labels that comparison as “since tracking started” and exposes the start date when it is available. Legacy data without a recoverable start baseline is labeled as the earliest retained sample instead.
+  - When one or more products meet a target, provides a dashboard link with the temporary `targetReached` filter.
   - Uses the Saved Signal navy/mint visual system on a neutral soft-slate canvas with accessible contrast, visible keyboard focus, and reduced-motion support. Popup height remains content-driven.
   - Opening wishlist import from the popup passes the supported `?import=` dashboard URL; the background authorizes that exact dashboard path with or without its query while rejecting other extension pages.
 
@@ -80,6 +86,7 @@ This document defines the expected behavior of all features in the Amazon Wishli
 - **Features:**
   - Displays all tracked items in a grid/list.
   - Allows persistent sorting, text searching, and filters for price drops, priority, stock, reached targets, and unchecked products.
+  - Accepts only allowlisted dashboard filter query values. A query-provided filter is temporary and does not overwrite the remembered preference unless the user changes the filter.
   - Progressively renders 50 products at a time with "Load More" pagination that preserves scroll position. Chart metadata and canvases are created only when charts are opened.
   - Wishlist selection shows at most 50 products per page while preserving selection across pages. “Select All” applies to the complete extracted wishlist, not only the visible page.
   - Detailed product cards show explicit price histories, timestamps of previous scrapes, and native wishlist price-drop text.
@@ -87,6 +94,8 @@ This document defines the expected behavior of all features in the Amazon Wishli
   - "Sync Wishlist Now" button to manually trigger a batch update for a specific wishlist.
   - Blocking browser dialogs are not used. Validation, progress, failures, and mutation results appear in accessible inline status regions; actionable errors persist until the user takes another action.
   - Priority and history controls expose their live state through `aria-pressed` and `aria-expanded`. Moving into or out of wishlist selection and product details transfers and restores keyboard focus.
+  - Escape returns from wishlist selection and product-details views while restoring focus to the initiating control; these views are not modal dialogs and do not trap focus.
+  - Price display formats the numeric portion for the browser locale while preserving the stored currency symbol. History charts label their point count as stored samples, not fetches.
   - At high browser zoom or short viewport heights, the dashboard switches to document scrolling so toolbar controls, product actions, and wishlist import remain reachable without horizontal overflow.
   - Scheduler copy uses user language. A pending 60-second wishlist continuation is shown as the next wishlist sync when it occurs.
   - A pending legacy currencyless target displays a persistent warning that links to Extension Settings and disappears when the setting is acknowledged.
@@ -95,14 +104,16 @@ This document defines the expected behavior of all features in the Amazon Wishli
 - **Purpose:** Global settings and local data backup/restore.
 - **Features:**
   - Configure the global `Default Discount Alert (%)`. Target prices are configured per product to avoid applying one numeric value across different currencies.
-  - Configurable strict price-history retention (30 days, 90 days, 1 year, or forever). Expired points are deleted.
-  - Export a versioned JSON backup containing tracked products, price history, tracked wishlists, and supported preferences.
+  - Configurable strict price-history retention (30 days, 90 days, 1 year, or forever). Expired points are deleted; retained history keeps the newest seven days at source resolution, then daily low/high points through one year and monthly low/high points thereafter, subject to the 10,000-point per-product bound. A backup is additionally bounded to 500,000 total history points.
+  - Export a version 2 JSON backup containing tracked products, compacted price history, tracked wishlists, supported preferences, and compaction metadata. Version 1 and unversioned valid backups remain restorable.
+  - Validate an export with the same restore validator before download. Downloads use a local Blob URL rather than a data URI, remain under 32 MiB, and always produce a restorable payload. If export compaction was necessary, the status explains that older high-frequency samples were condensed.
   - Select and validate backups under a 32 MiB file limit, preview product/history/wishlist counts, and require an expiring second confirmation before replacement.
   - Restore only canonical supported Amazon URLs and allowlisted record fields. The Options page validates first; the background worker independently validates again and accepts the mutation only from the top-level Options page.
   - Queue restore behind in-flight scrape work, replace user-owned Local data under the tracked-item mutex, reset unfinished cursors while keeping imported products due for fresh checks, invalidate pre-restore history writers, preserve active CAPTCHA/rate-limit backoff, and restore the exact prior Local snapshot if the Sync settings write fails.
   - Clear all price history only after previously started scrape/import work has finished, so a pre-clear sample cannot reappear after the success message.
   - Explain that tracked items and price history stay on the device, lightweight preferences may use Chrome sync, backups contain shopping-interest data, restore replaces current local tracking data, and clearing history does not stop tracking.
   - Preserve an older currencyless global target until explicit acknowledgement. Offer a one-click copy only for a revalidated single-currency collection; otherwise direct the user to set per-product targets.
+  - All Options and Dashboard preference changes are serialized by the background worker. The `PATCH_SETTINGS` runtime message accepts only the fields owned by its sending page and returns the resulting current settings, preventing concurrent view updates from overwriting each other.
 
 ---
 

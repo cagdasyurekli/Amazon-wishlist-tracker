@@ -19,6 +19,7 @@ globalThis.document = dom.window.document;
 globalThis.chrome = {
   runtime: { onMessage: { addListener() {} } }
 };
+require('../utils/availability.js');
 const offscreen = require('../background/offscreen.js');
 
 const originals = {
@@ -70,6 +71,26 @@ afterEach(() => {
 });
 
 describe('canonical Amazon URL and image policy', () => {
+  it('migrates legacy wishlist regions only from one trustworthy origin or an observed URL', () => {
+    const source = ['LIST_1-ABC', 'AMBIG_LIST'];
+    const items = [
+      { id: 'B000000001', url: 'http://www.amazon.de/dp/B000000001', wishlistIds: ['LIST_1-ABC', 'AMBIG_LIST'] },
+      { id: 'B000000002', url: 'https://www.amazon.fr/dp/B000000002', wishlistIds: ['AMBIG_LIST'] }
+    ];
+    const migrated = amazon.migrateLegacyWishlistRecords(source, items);
+
+    assert.deepEqual(migrated, [
+      { id: 'LIST_1-ABC', url: 'https://www.amazon.de/hz/wishlist/ls/LIST_1-ABC', autoSync: false },
+      { id: 'AMBIG_LIST', url: null, autoSync: false, needsRegionReview: true }
+    ]);
+    assert.deepEqual(source, ['LIST_1-ABC', 'AMBIG_LIST']);
+
+    assert.deepEqual(
+      amazon.migrateLegacyWishlistRecords(migrated, items, 'https://www.amazon.fr/hz/wishlist/ls/AMBIG_LIST')[1],
+      { id: 'AMBIG_LIST', url: 'https://www.amazon.fr/hz/wishlist/ls/AMBIG_LIST', autoSync: false }
+    );
+  });
+
   it('accepts supported HTTPS URLs and rejects scheme, authority, port and lookalike variants', () => {
     for (const domain of ['amazon.com', 'amazon.nl', 'amazon.de', 'amazon.fr', 'amazon.es', 'amazon.it', 'amazon.co.uk']) {
       assert.ok(amazon.parseCanonicalAmazonUrl(`https://www.${domain}/dp/B000000001`));

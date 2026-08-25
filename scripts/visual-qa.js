@@ -49,6 +49,9 @@ async function main() {
           inStock: true,
           wishlistPriceDropPercent: 20,
           wishlistPriceWhenAdded: 24.99,
+          trackingStartPrice: 24.99,
+          trackingStartedAt: Date.now() - 86400000,
+          trackingBaselineExact: true,
           addedAt: Date.now(),
           lastChecked: Date.now()
         }],

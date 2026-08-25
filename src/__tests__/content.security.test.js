@@ -3,6 +3,8 @@
  * @jest-environment-options {"url":"https://www.amazon.com/dp/B000000001"}
  */
 
+const availabilityFixtures = require('../__fixtures__/availability-fixtures.cjs');
+
 describe('content-script tracking boundary', () => {
   let contentMessageListener;
   let capturedShadow;
@@ -10,6 +12,7 @@ describe('content-script tracking boundary', () => {
 
   beforeEach(() => {
     jest.resetModules();
+    require('../utils/availability.js');
     document.body.innerHTML = `
       <div id="buybox"></div>
       <h1 id="productTitle">A legitimate product</h1>
@@ -106,5 +109,20 @@ describe('content-script tracking boundary', () => {
     expect(response.items[0].title.length).toBe(300);
     expect(response.items[0].wishlistItemId.length).toBe(128);
     expect(response.items[0].url).toBe('https://www.amazon.com/dp/B000000000');
+  });
+
+  test.each(availabilityFixtures)('uses shared $locale unavailable phrases for visible wishlist rows', ({ available, unavailable }) => {
+    document.body.innerHTML = `
+      <div id="buybox"></div>
+      <div id="g-items">
+        <li data-itemid="available"><a href="/dp/B000000001">Available item</a><span class="a-price">$19.99</span><p>${available}</p></li>
+        <li data-itemid="unavailable"><a href="/dp/B000000002">Unavailable item</a><span class="a-price">$20.99</span><p>${unavailable}</p></li>
+      </div>`;
+    require('../content/content.js');
+
+    let response;
+    contentMessageListener({ type: 'EXTRACT_VISIBLE_WISHLIST' }, { id: 'test-extension' }, (value) => { response = value; });
+
+    expect(response.items.map((item) => item.inStock)).toEqual([true, false]);
   });
 });

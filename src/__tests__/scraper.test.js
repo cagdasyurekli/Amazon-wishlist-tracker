@@ -11,9 +11,24 @@ global.chrome = {
   }
 };
 
+require('../utils/availability.js');
+const availabilityFixtures = require('../__fixtures__/availability-fixtures.cjs');
 const { parseAmazonHtml, parseAmazonWishlist, parsePrice, parseWishlistPriceDrop } = require('../background/offscreen.js');
 
 describe('Amazon HTML Parser (Offscreen Worker)', () => {
+  test.each(availabilityFixtures)('parses $locale product availability with negative precedence', ({ available, unavailable }) => {
+    const availableData = parseAmazonHtml(
+      `<html><body><div id="availability"><span>${available}</span></div></body></html>`,
+      'https://www.amazon.com/dp/B000000001'
+    );
+    const unavailableData = parseAmazonHtml(
+      `<html><body><div id="availability"><span>${unavailable}</span></div></body></html>`,
+      'https://www.amazon.com/dp/B000000001'
+    );
+    expect(availableData.inStock).toBe(true);
+    expect(unavailableData.inStock).toBe(false);
+  });
+
   it('should throw an error if a CAPTCHA is detected via the title', () => {
     const html = `
       <html>

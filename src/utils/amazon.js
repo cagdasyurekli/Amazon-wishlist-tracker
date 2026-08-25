@@ -20,6 +20,7 @@ const AMAZON_IMAGE_HOSTS = new Set([
 ]);
 
 const WISHLIST_PATH_PATTERN = /\/(?:hz\/)?wishlist\/ls\/([a-z0-9_-]{1,64})(?:[/?#]|$)/i;
+const WISHLIST_ID_PATTERN = /^[a-z0-9_-]{1,64}$/i;
 const PRODUCT_PATH_PATTERN = /\/(?:dp|gp\/product)\/([a-z0-9]{10})(?:[/?#]|$)/i;
 const MAX_URL_LENGTH = 2048;
 
@@ -72,6 +73,32 @@ export function getAmazonAsin(value) {
 export function parseCanonicalAmazonProductUrl(value) {
   const parsed = parseCanonicalAmazonUrl(value);
   return parsed && getAmazonAsin(parsed.href) ? parsed : null;
+}
+
+export function migrateLegacyWishlistRecords(wishlists, items = [], observedUrl = '') {
+  const observed = parseCanonicalAmazonWishlistUrl(observedUrl);
+  const observedId = observed ? getAmazonWishlistId(observed.href) : null;
+  return (Array.isArray(wishlists) ? wishlists : []).map((entry) => {
+    const id = typeof entry === 'string' ? entry : entry?.id;
+    if (typeof id !== 'string' || !WISHLIST_ID_PATTERN.test(id)) {
+      return entry;
+    }
+    if (observedId === id && (typeof entry === 'string' || entry.needsRegionReview || !entry.url)) {
+      return { id, url: observed.href, autoSync: false };
+    }
+    if (typeof entry !== 'string') return { ...entry };
+
+    const origins = new Set(items.flatMap((item) => {
+      if (!item?.wishlistIds?.includes(id)) return [];
+      const productUrl = normalizeStoredAmazonProductUrl(item.url, item.id);
+      if (!productUrl) return [];
+      return [new URL(productUrl).origin];
+    }));
+    if (origins.size === 1) {
+      return { id, url: `${[...origins][0]}/hz/wishlist/ls/${id}`, autoSync: false };
+    }
+    return { id, url: null, autoSync: false, needsRegionReview: true };
+  });
 }
 
 // Stored records from pre-1.1 releases may contain an otherwise valid Amazon

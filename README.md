@@ -9,9 +9,9 @@ A privacy-first Manifest V3 Chrome extension that tracks Amazon product and wish
 - Tracks products from supported Amazon regions: `.com`, `.co.uk`, `.de`, `.fr`, `.es`, `.it`, and `.nl`.
 - Imports public or shared wishlists and can keep their product membership in sync.
 - Uses bounded adaptive price checks, a separate priority queue, and anti-bot backoff.
-- Shows timestamped price history, availability, targets, and Amazon wishlist price-drop metadata.
+- Shows locale-aware price formatting, timestamped availability and price history, targets, and Amazon wishlist price-drop metadata.
 - Sends local Chrome notifications for configured price, discount, and restock conditions.
-- Exports and restores a validated local JSON backup of tracking data and preferences.
+- Exports and restores validated, self-restorable local JSON backups (v2; older valid backups remain supported).
 
 ## Privacy model
 
@@ -35,11 +35,11 @@ There is no production build step; Chrome executes the checked-in extension sour
 - On a public/shared wishlist, choose **Import This Wishlist**, or paste its URL into the dashboard.
 - Use the dashboard to search, filter, inspect history, set per-product target prices, prioritize checks, and manage tracked items.
 - Enable **Keep List in Sync** only when new and removed wishlist membership should be reconciled automatically. Items tracked independently or by another wishlist are preserved.
-- Use **Extension Settings** to export a backup or restore one after reviewing its item, history, and wishlist counts.
+- Use **Extension Settings** to export a backup or restore one after reviewing its item, history, and wishlist counts. History is compacted over time to retain useful low/high detail without unbounded growth.
 
 ## Development and verification
 
-Requirements: Node.js 22.12 or newer and a locally available Chrome/Chromium supported by Puppeteer.
+Requirements: Node.js 22.13 or newer and a locally available Chrome/Chromium supported by Puppeteer.
 
 ```bash
 npm ci

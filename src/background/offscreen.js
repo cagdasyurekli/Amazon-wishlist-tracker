@@ -326,28 +326,7 @@ function parseAmazonHtml(htmlString, url) {
   const availabilityEl = doc.querySelector('#availability');
   if (availabilityEl) {
     const text = availabilityEl.textContent.toLowerCase();
-    // Negative phrases that contain a positive substring ("available" lives
-    // inside "unavailable"; "available from these sellers" appears when the
-    // buy box itself is empty). These must veto an in-stock match.
-    const negativePhrases = [
-      'unavailable',
-      'not available',
-      'not currently available',
-      'out of stock',
-      'available from',
-      'cannot be shipped',
-      'see all buying options'
-    ];
-    const positivePhrases = [
-      'in stock',
-      'op voorraad',
-      'available',
-      'usually ships',
-      'ships within'
-    ];
-    data.inStock =
-      positivePhrases.some((p) => text.includes(p)) &&
-      !negativePhrases.some((p) => text.includes(p));
+    data.inStock = globalThis.AmazonAvailability.classifyAvailabilityText(text) === true;
   } else if (data.price !== null) {
     // If no availability div but has price, usually in stock
     data.inStock = true; 
@@ -409,9 +388,7 @@ function parseAmazonWishlist(htmlString, url) {
 
     // Check for "Unavailable" text
     const itemText = el.textContent.toLowerCase();
-    const isUnavailable = itemText.includes('currently unavailable') || 
-                          itemText.includes('no longer available') || 
-                          itemText.includes('niet beschikbaar');
+    const isUnavailable = globalThis.AmazonAvailability.classifyAvailabilityText(itemText) === false;
     const inStock = !isUnavailable;
 
     // Determine regional domain from wishlist URL

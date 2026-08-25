@@ -4,18 +4,24 @@ import {
   parseCanonicalAmazonWishlistUrl,
   sanitizeAmazonImageUrl
 } from './amazon.js';
+import {
+  applyMissingTrackingBaselines,
+  compactPriceHistory,
+  limitHistoryTotal,
+  MAX_HISTORY_POINTS,
+  MAX_HISTORY_POINTS_PER_ITEM
+} from './history.mjs';
 
 export const BACKUP_FORMAT = 'saved-signal-backup';
-export const BACKUP_VERSION = 1;
+export const BACKUP_VERSION = 2;
 export const MAX_BACKUP_BYTES = 32 * 1024 * 1024;
 
 const ASIN_PATTERN = /^[A-Z0-9]{10}$/;
 const WISHLIST_ID_PATTERN = /^[a-z0-9_-]{1,64}$/i;
 const MAX_ITEMS = 5000;
 const MAX_WISHLISTS = 500;
-const MAX_HISTORY_POINTS = 500000;
-const MAX_HISTORY_POINTS_PER_ITEM = 10000;
 const MAX_PRICE = 1_000_000_000;
+const SUPPORTED_BACKUP_VERSIONS = new Set([1, BACKUP_VERSION]);
 const ALLOWED_RETENTION = new Set(['30', '90', '365', 'forever']);
 const ALLOWED_SORTS = new Set(['recent', 'priceAsc', 'priceDesc', 'discountDesc']);
 const ALLOWED_FILTERS = new Set(['all', 'drops', 'priority', 'outOfStock', 'targetReached', 'unchecked']);
@@ -93,14 +99,15 @@ function sanitizeItem(rawItem) {
     wishlistPriceWhenAdded: { min: 0, max: MAX_PRICE },
     wishlistPriceDropAmount: { min: 0, max: MAX_PRICE },
     buyBoxPrice: { min: 0, max: MAX_PRICE },
-    salesRank: { min: 0, max: MAX_PRICE }
+    salesRank: { min: 0, max: MAX_PRICE },
+    trackingStartPrice: { min: 0, max: MAX_PRICE }
   };
   for (const [field, bounds] of Object.entries(numericFields)) {
     const value = optionalNumber(rawItem[field], field, bounds);
     if (value != null) item[field] = value;
   }
 
-  for (const field of ['addedAt', 'updatedAt', 'lastChecked']) {
+  for (const field of ['addedAt', 'updatedAt', 'lastChecked', 'trackingStartedAt']) {
     const value = optionalTimestamp(rawItem[field], field);
     if (value != null) item[field] = value;
   }
@@ -111,6 +118,9 @@ function sanitizeItem(rawItem) {
   if (dropText) item.wishlistPriceDropText = dropText;
   if (typeof rawItem.wasInStockPreviously === 'boolean') {
     item.wasInStockPreviously = rawItem.wasInStockPreviously;
+  }
+  if (typeof rawItem.trackingBaselineExact === 'boolean') {
+    item.trackingBaselineExact = rawItem.trackingBaselineExact;
   }
 
   return item;
@@ -145,7 +155,18 @@ function sanitizeHistory(rawHistory) {
   return history;
 }
 
-function sanitizeWishlists(rawWishlists) {
+function inferLegacyWishlistOrigin(rawId, items) {
+  const origins = new Set();
+  for (const item of items) {
+    if (!item.wishlistIds?.includes(rawId)) continue;
+    try {
+      origins.add(new URL(item.url).origin);
+    } catch (_error) {}
+  }
+  return origins.size === 1 ? [...origins][0] : null;
+}
+
+function sanitizeWishlists(rawWishlists, items) {
   if (rawWishlists == null) return [];
   if (!Array.isArray(rawWishlists) || rawWishlists.length > MAX_WISHLISTS) {
     throw new Error('Invalid tracked wishlists.');
@@ -158,12 +179,25 @@ function sanitizeWishlists(rawWishlists) {
     if (typeof rawId !== 'string' || !WISHLIST_ID_PATTERN.test(rawId)) {
       throw new Error('Invalid tracked wishlist identifier.');
     }
-    const rawUrl = legacyId ? `https://www.amazon.com/hz/wishlist/ls/${rawId}` : entry.url;
+    if (byId.has(rawId)) throw new Error(`Duplicate tracked wishlist ${rawId}.`);
+    const inferredOrigin = legacyId ? inferLegacyWishlistOrigin(rawId, items) : null;
+    const unresolved = Boolean(legacyId && !inferredOrigin) || entry?.needsRegionReview === true;
+    const rawUrl = legacyId
+      ? (inferredOrigin ? `${inferredOrigin}/hz/wishlist/ls/${rawId}` : null)
+      : entry.url;
+    if (unresolved) {
+      byId.set(rawId, {
+        id: rawId,
+        url: null,
+        autoSync: false,
+        needsRegionReview: true
+      });
+      continue;
+    }
     const parsed = parseCanonicalAmazonWishlistUrl(rawUrl);
     if (!parsed || getAmazonWishlistId(parsed.href) !== rawId) {
       throw new Error(`Invalid tracked wishlist URL for ${rawId}.`);
     }
-    if (byId.has(rawId)) throw new Error(`Duplicate tracked wishlist ${rawId}.`);
     byId.set(rawId, {
       id: rawId,
       url: `https://${parsed.hostname.toLowerCase()}/hz/wishlist/ls/${rawId}`,
@@ -202,21 +236,52 @@ function sanitizeSettings(rawSettings) {
 }
 
 export function createBackupPayload({ items, history, trackedWishlists, settings }) {
-  return {
+  const retention = settings?.historyRetentionDays || '30';
+  const baselines = applyMissingTrackingBaselines(items, history);
+  const compacted = compactPriceHistory(history, { retention });
+  const bounded = limitHistoryTotal(compacted.history);
+  const canonical = validateBackupPayload({
+    items: baselines.items,
+    history: bounded.history,
+    trackedWishlists: Array.isArray(trackedWishlists) ? trackedWishlists : [],
+    settings: isPlainObject(settings) ? settings : {}
+  });
+  const payload = {
     format: BACKUP_FORMAT,
     version: BACKUP_VERSION,
     exportedAt: new Date().toISOString(),
-    items: Array.isArray(items) ? items : [],
-    history: isPlainObject(history) ? history : {},
-    trackedWishlists: Array.isArray(trackedWishlists) ? trackedWishlists : [],
-    settings: isPlainObject(settings) ? settings : {}
+    historyPolicy: {
+      recentRawDays: 7,
+      olderResolution: 'daily-low-high; monthly-low-high after one year',
+      compacted: compacted.compacted || bounded.compacted,
+      removedPointCount: compacted.removedCount + bounded.removedCount
+    },
+    items: canonical.items,
+    history: canonical.history,
+    trackedWishlists: canonical.trackedWishlists,
+    settings: canonical.settings
   };
+  // Keep export and restore on exactly the same data contract. This also makes
+  // future format changes fail closed if the writer drifts from the reader.
+  validateBackupPayload(payload);
+  return payload;
+}
+
+export function createBackupBlob(payload) {
+  validateBackupPayload(payload);
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+  if (blob.size > MAX_BACKUP_BYTES) {
+    throw new Error('Backup is larger than the 32 MB safety limit.');
+  }
+  return blob;
 }
 
 export function validateBackupPayload(payload) {
   if (!isPlainObject(payload)) throw new Error('Backup must be a JSON object.');
   if (payload.format != null && payload.format !== BACKUP_FORMAT) throw new Error('Unsupported backup format.');
-  if (payload.version != null && payload.version !== BACKUP_VERSION) throw new Error('Unsupported backup version.');
+  if (payload.version != null && !SUPPORTED_BACKUP_VERSIONS.has(payload.version)) {
+    throw new Error('Unsupported backup version.');
+  }
   if (!Array.isArray(payload.items) || payload.items.length > MAX_ITEMS) {
     throw new Error(`Backup must contain at most ${MAX_ITEMS} tracked products.`);
   }
@@ -226,7 +291,7 @@ export function validateBackupPayload(payload) {
     throw new Error('Backup contains duplicate tracked products.');
   }
   const history = sanitizeHistory(payload.history);
-  const trackedWishlists = sanitizeWishlists(payload.trackedWishlists);
+  const trackedWishlists = sanitizeWishlists(payload.trackedWishlists, items);
   const settings = sanitizeSettings(payload.settings);
 
   return {

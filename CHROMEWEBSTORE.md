@@ -135,3 +135,5 @@ Use the public repository URL after readback verification.
 | 1.0.0 | 2026-07-04 | Initial release | Released |
 | 1.1.0 | 2026-08-24 | Adaptive sync, scale, UI, logo, privacy and security hardening | GitHub source public; Chrome Web Store not submitted |
 | 1.2.0 | 2026-08-24 | Validated backup restore and public-repository automation | GitHub source release only; Chrome Web Store not submitted |
+| 1.2.1 | 2026-08-25 | Scrape coordination, partial-result safety, and history-clear ordering | GitHub source release only; Chrome Web Store not submitted |
+| 1.3.0 | 2026-08-26 | Regional availability, canonical identity, compacted history, backup v2, and serialized settings | GitHub source release only; Chrome Web Store not submitted |

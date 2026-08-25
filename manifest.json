@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Amazon Wishlist Tracker",
-  "version": "1.2.1",
+  "version": "1.3.0",
   "description": "Private, local-first price and stock tracking for Amazon products and wishlists.",
   "permissions": [
     "storage",
@@ -50,7 +50,7 @@
         "https://*.amazon.co.uk/*"
       ],
       "css": ["src/content/content.css"],
-      "js": ["src/content/content.js"]
+      "js": ["src/utils/availability.js", "src/content/content.js"]
     }
   ],
   "icons": {

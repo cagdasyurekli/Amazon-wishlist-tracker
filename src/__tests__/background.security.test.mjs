@@ -6,11 +6,13 @@ import { readFile } from 'node:fs/promises';
 const backgroundSource = await readFile(new URL('../background/background.js', import.meta.url), 'utf8');
 const legacyNoticeSource = await readFile(new URL('../background/legacy_target_notice.js', import.meta.url), 'utf8');
 const partialPolicySource = await readFile(new URL('../background/wishlist_partial_policy.js', import.meta.url), 'utf8');
+const settingsSource = await readFile(new URL('../utils/settings.js', import.meta.url), 'utf8');
 
 async function loadBackground(initialItems = [], options = {}) {
   let trackedItems = initialItems.map((item) => ({ ...item }));
   let currentSettings = { ...(options.settings || {}) };
   let settingsWriteCompleted = false;
+  let settingsWriteCount = 0;
   let messageListener;
   let alarmListener;
   const savedItems = [];
@@ -79,8 +81,25 @@ async function loadBackground(initialItems = [], options = {}) {
   );
 
   const amazonModule = new vm.SyntheticModule(
-    ['normalizeStoredAmazonProductUrl', 'sanitizeAmazonImageUrl'],
+    ['getAmazonWishlistId', 'migrateLegacyWishlistRecords', 'normalizeStoredAmazonProductUrl', 'parseCanonicalAmazonWishlistUrl', 'sanitizeAmazonImageUrl'],
     function initialize() {
+      const parseWishlist = (value) => {
+        try {
+          const parsed = new URL(value);
+          return parsed.protocol === 'https:' && /(^|\.)amazon\.(com|nl|de|fr|es|it|co\.uk)$/i.test(parsed.hostname) &&
+            /\/(?:hz\/)?wishlist\/ls\/[a-z0-9_-]{1,64}(?:[/?#]|$)/i.test(parsed.pathname)
+            ? parsed
+            : null;
+        } catch { return null; }
+      };
+      this.setExport('getAmazonWishlistId', (value) =>
+        parseWishlist(value)?.pathname.match(/\/(?:hz\/)?wishlist\/ls\/([a-z0-9_-]{1,64})(?:[/?#]|$)/i)?.[1] || null
+      );
+      this.setExport('migrateLegacyWishlistRecords', (wishlists) => wishlists.map((entry) =>
+        typeof entry === 'string'
+          ? { id: entry, url: null, autoSync: false, needsRegionReview: true }
+          : { ...entry }
+      ));
       this.setExport('normalizeStoredAmazonProductUrl', (value, expectedAsin) => {
         try {
           const parsed = new URL(value);
@@ -90,6 +109,7 @@ async function loadBackground(initialItems = [], options = {}) {
           return `https://${parsed.hostname.toLowerCase()}/dp/${asin}`;
         } catch { return null; }
       });
+      this.setExport('parseCanonicalAmazonWishlistUrl', parseWishlist);
       this.setExport('sanitizeAmazonImageUrl', () => '');
     },
     { context }
@@ -113,7 +133,7 @@ async function loadBackground(initialItems = [], options = {}) {
   const StorageArea = { LOCAL: 'local', SYNC: 'sync' };
   const storageModule = new vm.SyntheticModule(
     [
-      'getTrackedItems', 'saveTrackedItem', 'updateTrackedItems', 'updateTrackedItemsIf', 'updateTrackedItemsWithFinalizer', 'updatePriceHistory', 'getStorageData',
+      'getTrackedItems', 'saveTrackedItem', 'updateTrackedItems', 'updateTrackedItemsIf', 'updateTrackedItemsWithFinalizer', 'updateTrackedWishlists', 'updatePriceHistory', 'getStorageData',
       'replaceTrackingData', 'clearPriceHistory', 'setStorageData', 'setStorageItems', 'formatPrice', 'prunePriceHistory', 'StorageKeys', 'StorageArea'
     ],
     function initialize() {
@@ -145,6 +165,12 @@ async function loadBackground(initialItems = [], options = {}) {
           throw error;
         }
       });
+      this.setExport('updateTrackedWishlists', async (updater) => {
+        localStorage.set(
+          StorageKeys.TRACKED_WISHLISTS,
+          updater(localStorage.get(StorageKeys.TRACKED_WISHLISTS) || [], trackedItems)
+        );
+      });
       this.setExport('updatePriceHistory', async (updater) => {
         priceHistory = updater(priceHistory);
         localStorage.set(StorageKeys.PRICE_HISTORY, priceHistory);
@@ -157,6 +183,7 @@ async function loadBackground(initialItems = [], options = {}) {
         return nextGeneration;
       });
       this.setExport('replaceTrackingData', async (backup) => {
+        if (options.beforeRestore) await options.beforeRestore(backup);
         restoredBackups.push(backup);
         trackedItems = backup.items.map((entry) => ({ ...entry }));
         currentSettings = { ...backup.settings };
@@ -177,6 +204,8 @@ async function loadBackground(initialItems = [], options = {}) {
       this.setExport('setStorageData', async (key, value, area) => {
         if (key === StorageKeys.SETTINGS && area === StorageArea.SYNC) {
           if (options.failSettingsWrite) throw new Error('Synthetic Sync write failure');
+          settingsWriteCount += 1;
+          if (options.beforeSettingsWrite) await options.beforeSettingsWrite(value, settingsWriteCount);
           currentSettings = { ...value };
           settingsWriteCompleted = true;
           return;
@@ -202,6 +231,7 @@ async function loadBackground(initialItems = [], options = {}) {
 
   const legacyNoticeModule = new vm.SourceTextModule(legacyNoticeSource, { context });
   const partialPolicyModule = new vm.SourceTextModule(partialPolicySource, { context });
+  const settingsModule = new vm.SourceTextModule(settingsSource, { context });
   const backupModule = new vm.SyntheticModule(
     ['validateBackupPayload'],
     function initialize() {
@@ -219,6 +249,7 @@ async function loadBackground(initialItems = [], options = {}) {
     if (specifier === '../utils/storage.js') return storageModule;
     if (specifier === '../utils/amazon.js') return amazonModule;
     if (specifier === '../utils/backup.js') return backupModule;
+    if (specifier === '../utils/settings.js') return settingsModule;
     if (specifier === './legacy_target_notice.js') return legacyNoticeModule;
     if (specifier === './wishlist_partial_policy.js') return partialPolicyModule;
     throw new Error(`Unexpected import: ${specifier}`);
@@ -240,6 +271,7 @@ async function loadBackground(initialItems = [], options = {}) {
     restoredBackups,
     getTrackedItems: () => trackedItems,
     getSettings: () => currentSettings,
+    getSettingsWriteCount: () => settingsWriteCount,
     getPriceHistory: () => priceHistory,
     getLocalStorage: (key) => localStorage.get(key),
     getWishlistScrapeCalls: () => wishlistScrapeCalls,
@@ -285,11 +317,212 @@ function optionsSender(overrides = {}) {
   };
 }
 
+describe('serialized settings patches', () => {
+  it('enforces sender-scoped fields and validates supported values', async () => {
+    const harness = await loadBackground([], {
+      settings: { defaultTargetPrice: 12.5 }
+    });
+
+    const optionsPatch = await harness.sendMessage({
+      type: 'PATCH_SETTINGS',
+      set: { defaultDiscount: 20, historyRetentionDays: '365' }
+    }, optionsSender());
+    assert.equal(optionsPatch.success, true);
+    assert.equal(optionsPatch.settings.defaultTargetPrice, 12.5);
+    assert.equal(optionsPatch.settings.defaultDiscount, 20);
+    assert.equal(optionsPatch.settings.historyRetentionDays, '365');
+
+    const dashboardPatch = await harness.sendMessage({
+      type: 'PATCH_SETTINGS',
+      set: { dashboardSort: 'priceAsc', dashboardFilter: 'priority' }
+    }, dashboardSender());
+    assert.equal(dashboardPatch.success, true);
+    assert.equal(dashboardPatch.settings.defaultDiscount, 20);
+    assert.equal(dashboardPatch.settings.dashboardSort, 'priceAsc');
+    assert.equal(dashboardPatch.settings.dashboardFilter, 'priority');
+
+    const rejected = await Promise.all([
+      harness.sendMessage({ type: 'PATCH_SETTINGS', set: { dashboardSort: 'recent' } }, optionsSender()),
+      harness.sendMessage({ type: 'PATCH_SETTINGS', set: { defaultDiscount: 25 } }, dashboardSender()),
+      harness.sendMessage({ type: 'PATCH_SETTINGS', set: { defaultDiscount: 0 } }, optionsSender()),
+      harness.sendMessage({ type: 'PATCH_SETTINGS', set: { historyRetentionDays: '31' } }, optionsSender()),
+      harness.sendMessage({ type: 'PATCH_SETTINGS', remove: ['defaultTargetPrice'] }, optionsSender()),
+      harness.sendMessage({ type: 'PATCH_SETTINGS', set: { dashboardFilter: 'all' } }, dashboardSender({ frameId: 2 })),
+      harness.sendMessage(
+        { type: 'PATCH_SETTINGS', set: { defaultDiscount: 25 } },
+        optionsSender({ url: 'chrome-extension://test-extension/src/popup/popup.html' })
+      )
+    ]);
+    for (const response of rejected) assert.equal(typeof response.error, 'string');
+    assert.equal(harness.getSettingsWriteCount(), 2);
+
+    const removed = await harness.sendMessage({
+      type: 'PATCH_SETTINGS',
+      remove: ['defaultDiscount']
+    }, optionsSender());
+    assert.equal(removed.success, true);
+    assert.equal(Object.hasOwn(removed.settings, 'defaultDiscount'), false);
+    assert.equal(removed.settings.dashboardSort, 'priceAsc');
+  });
+
+  it('serializes concurrent Options and Dashboard updates without losing fields', async () => {
+    let markFirstWriteStarted;
+    let releaseFirstWrite;
+    const firstWriteStarted = new Promise((resolve) => { markFirstWriteStarted = resolve; });
+    const firstWriteGate = new Promise((resolve) => { releaseFirstWrite = resolve; });
+    const harness = await loadBackground([], {
+      beforeSettingsWrite: async (_settings, writeCount) => {
+        if (writeCount !== 1) return;
+        markFirstWriteStarted();
+        await firstWriteGate;
+      }
+    });
+
+    const dashboardUpdate = harness.sendMessage({
+      type: 'PATCH_SETTINGS',
+      set: { dashboardSort: 'priceDesc' }
+    }, dashboardSender());
+    await firstWriteStarted;
+    const optionsUpdate = harness.sendMessage({
+      type: 'PATCH_SETTINGS',
+      set: { defaultDiscount: 30 }
+    }, optionsSender());
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(harness.getSettingsWriteCount(), 1);
+
+    releaseFirstWrite();
+    assert.equal((await dashboardUpdate).success, true);
+    const optionsResponse = await optionsUpdate;
+    assert.equal(optionsResponse.success, true);
+    assert.equal(optionsResponse.settings.dashboardSort, 'priceDesc');
+    assert.equal(optionsResponse.settings.defaultDiscount, 30);
+    assert.equal(harness.getSettings().dashboardSort, 'priceDesc');
+    assert.equal(harness.getSettings().defaultDiscount, 30);
+  });
+
+  it('orders restore and legacy acknowledgement with preference patches', async () => {
+    let markFirstWriteStarted;
+    let releaseFirstWrite;
+    const firstWriteStarted = new Promise((resolve) => { markFirstWriteStarted = resolve; });
+    const firstWriteGate = new Promise((resolve) => { releaseFirstWrite = resolve; });
+    const harness = await loadBackground([item()], {
+      settings: { defaultTargetPrice: 12.5, defaultDiscount: 10 },
+      beforeSettingsWrite: async (_settings, writeCount) => {
+        if (writeCount !== 1) return;
+        markFirstWriteStarted();
+        await firstWriteGate;
+      }
+    });
+
+    const preferenceUpdate = harness.sendMessage({
+      type: 'PATCH_SETTINGS',
+      set: { defaultDiscount: 40 }
+    }, optionsSender());
+    await firstWriteStarted;
+    const acknowledgement = harness.sendMessage({
+      type: 'ACKNOWLEDGE_LEGACY_TARGET_PRICE',
+      targetPrice: 12.5
+    }, optionsSender());
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(harness.getSettingsWriteCount(), 1);
+
+    releaseFirstWrite();
+    assert.equal((await preferenceUpdate).success, true);
+    const acknowledged = await acknowledgement;
+    assert.equal(acknowledged.success, true);
+    assert.equal(acknowledged.settings.defaultDiscount, 40);
+    assert.equal(Object.hasOwn(acknowledged.settings, 'defaultTargetPrice'), false);
+
+    let markSecondPatchStarted;
+    let releaseSecondPatch;
+    const secondPatchStarted = new Promise((resolve) => { markSecondPatchStarted = resolve; });
+    const secondPatchGate = new Promise((resolve) => { releaseSecondPatch = resolve; });
+    const restoreHarness = await loadBackground([item()], {
+      beforeSettingsWrite: async (_settings, writeCount) => {
+        if (writeCount !== 1) return;
+        markSecondPatchStarted();
+        await secondPatchGate;
+      }
+    });
+    const secondPatch = restoreHarness.sendMessage({
+      type: 'PATCH_SETTINGS',
+      set: { defaultDiscount: 35 }
+    }, optionsSender());
+    await secondPatchStarted;
+    const backup = {
+      items: [item('B000000002')],
+      history: {},
+      trackedWishlists: [],
+      settings: { historyRetentionDays: 'forever' },
+      summary: { itemCount: 1, historyPointCount: 0, wishlistCount: 0 }
+    };
+    const restore = restoreHarness.sendMessage({ type: 'RESTORE_BACKUP', backup }, optionsSender());
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(restoreHarness.restoredBackups.length, 0);
+
+    releaseSecondPatch();
+    assert.equal((await secondPatch).success, true);
+    const restored = await restore;
+    assert.equal(restored.success, true);
+    assert.equal(restored.settings.historyRetentionDays, 'forever');
+    assert.equal(restoreHarness.getSettings().historyRetentionDays, 'forever');
+    assert.equal(Object.hasOwn(restoreHarness.getSettings(), 'defaultDiscount'), false);
+  });
+});
+
+describe('tracked wishlist mutation boundary', () => {
+  it('keeps unresolved legacy regions fail-closed and accepts review only from Dashboard', async () => {
+    const harness = await loadBackground([], {
+      localStorage: { trackedWishlists: ['LEGACY_LIST-1'] }
+    });
+
+    assert.deepEqual(Array.from(harness.getLocalStorage('trackedWishlists'), (entry) => ({ ...entry })), [{
+      id: 'LEGACY_LIST-1',
+      url: null,
+      autoSync: false,
+      needsRegionReview: true
+    }]);
+
+    const unauthorizedMigration = await harness.sendMessage(
+      { type: 'MIGRATE_LEGACY_WISHLISTS' },
+      optionsSender()
+    );
+    assert.match(unauthorizedMigration.error, /Unauthorized/i);
+
+    const unauthorizedUpdate = await harness.sendMessage({
+      type: 'UPSERT_TRACKED_WISHLIST',
+      url: 'https://www.amazon.de/hz/wishlist/ls/LEGACY_LIST-1',
+      autoSync: true
+    }, optionsSender());
+    assert.match(unauthorizedUpdate.error, /Unauthorized/i);
+
+    const resolved = await harness.sendMessage({
+      type: 'UPSERT_TRACKED_WISHLIST',
+      url: 'https://www.amazon.de/hz/wishlist/ls/LEGACY_LIST-1',
+      autoSync: true
+    }, dashboardSender());
+    assert.equal(resolved.success, true);
+    assert.deepEqual(Array.from(resolved.wishlists, (entry) => ({ ...entry })), [{
+      id: 'LEGACY_LIST-1',
+      url: 'https://www.amazon.de/hz/wishlist/ls/LEGACY_LIST-1',
+      autoSync: true
+    }]);
+
+    const lookalike = await harness.sendMessage({
+      type: 'UPSERT_TRACKED_WISHLIST',
+      url: 'https://amazon.de.example/hz/wishlist/ls/LEGACY_LIST-1'
+    }, dashboardSender());
+    assert.match(lookalike.error, /Invalid/i);
+  });
+});
+
 describe('ADD_TRACKED_ITEM privilege boundary', () => {
   it('accepts one bounded item from the matching HTTPS Amazon tab', async () => {
     const harness = await loadBackground();
+    const beforeTracking = Date.now();
 
     const response = await harness.sendMessage({ type: 'ADD_TRACKED_ITEM', item: item() }, sender());
+    const afterTracking = Date.now();
 
     assert.equal(response.success, true);
     assert.equal(harness.savedItems.length, 1);
@@ -300,8 +533,13 @@ describe('ADD_TRACKED_ITEM privilege boundary', () => {
       currentPrice: 19.99,
       currency: '$',
       originalPrice: 19.99,
-      trackedIndividually: true
+      trackedIndividually: true,
+      trackingStartPrice: 19.99,
+      trackingStartedAt: harness.savedItems[0].trackingStartedAt,
+      trackingBaselineExact: true
     });
+    assert.ok(harness.savedItems[0].trackingStartedAt >= beforeTracking);
+    assert.ok(harness.savedItems[0].trackingStartedAt <= afterTracking);
   });
 
   it('preserves the existing-record flow and marks it individually tracked', async () => {
@@ -607,6 +845,38 @@ describe('scraped purchase text handling', () => {
 });
 
 describe('target price notifications', () => {
+  it('records the first successful threshold result as a silent baseline', async () => {
+    const targetHarness = await loadBackground();
+    const targetItem = item('B000000001', { currentPrice: null, targetPrice: 15, inStock: true });
+    const result = (price) => ({
+      success: true,
+      price,
+      currency: '$',
+      inStock: true,
+      buyBoxPrice: null,
+      salesRank: null
+    });
+
+    targetHarness.api.processScrapeResult(targetItem, result(14), {}, 1);
+    assert.equal(targetHarness.notifications.length, 0);
+    targetHarness.api.processScrapeResult(targetItem, result(18), {}, 2);
+    targetHarness.api.processScrapeResult(targetItem, result(14), {}, 3);
+    assert.equal(targetHarness.notifications.length, 1);
+
+    const discountHarness = await loadBackground();
+    const discountItem = item('B000000002', {
+      currentPrice: null,
+      originalPrice: 100,
+      targetDiscountPercentage: 20,
+      inStock: true
+    });
+    discountHarness.api.processScrapeResult(discountItem, result(75), {}, 1);
+    assert.equal(discountHarness.notifications.length, 0);
+    discountHarness.api.processScrapeResult(discountItem, result(90), {}, 2);
+    discountHarness.api.processScrapeResult(discountItem, result(79), {}, 3);
+    assert.equal(discountHarness.notifications.length, 1);
+  });
+
   it('notifies on a downward target crossing, avoids repeat spam, and can notify after a reset', async () => {
     const harness = await loadBackground();
     const tracked = item('B000000001', { currentPrice: 20, targetPrice: 15, inStock: true });

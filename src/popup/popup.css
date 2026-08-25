@@ -156,6 +156,12 @@ a { -webkit-tap-highlight-color: transparent; }
   text-transform: uppercase;
 }
 
+.baseline-note {
+  margin: -4px 0 8px;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
 .recent-list {
   display: flex;
   flex-direction: column;

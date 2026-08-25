@@ -1,17 +1,30 @@
 import { getTrackedItems, getStorageData, formatPrice, StorageKeys, StorageArea } from '../utils/storage.js';
-import { normalizeStoredAmazonProductUrl } from '../utils/amazon.js';
+import {
+  getAmazonAsin,
+  getAmazonWishlistId,
+  normalizeStoredAmazonProductUrl,
+  parseCanonicalAmazonUrl
+} from '../utils/amazon.js';
 
 // The popup is a quick-glance surface: current-tab action + a few recent
 // items. The full list lives in the dashboard — rendering hundreds of cards
 // here made the popup unusable.
 const RECENT_ITEMS_COUNT = 3;
 
-function getAsin(url) {
-  return url?.match(/\/(?:dp|gp\/product)\/([A-Z0-9]{10})/i)?.[1] || null;
-}
-
-function getWishlistId(url) {
-  return url?.match(/wishlist\/ls\/([a-zA-Z0-9]+)/)?.[1] || null;
+function getTrackingBaseline(item, historyPoints) {
+  if (Number.isFinite(item.trackingStartPrice)) {
+    return {
+      price: item.trackingStartPrice,
+      timestamp: Number.isFinite(item.trackingStartedAt) ? item.trackingStartedAt : item.addedAt,
+      exact: item.trackingBaselineExact === true
+    };
+  }
+  const firstRetained = (Array.isArray(historyPoints) ? historyPoints : [])
+    .filter((point) => Number.isFinite(point?.price) && Number.isFinite(point?.timestamp))
+    .sort((a, b) => a.timestamp - b.timestamp)[0];
+  return firstRetained
+    ? { price: firstRetained.price, timestamp: firstRetained.timestamp, exact: false }
+    : null;
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
@@ -22,10 +35,12 @@ document.addEventListener('DOMContentLoaded', async () => {
   const importBtn = document.getElementById('import-wishlist-btn');
   const tabStatus = document.getElementById('tab-status');
   const recentSection = document.getElementById('recent-section');
+  const baselineNote = document.getElementById('baseline-note');
   const recentList = document.getElementById('recent-list');
   const template = document.getElementById('recent-item-template');
   const emptyState = document.getElementById('empty-state');
   const openDashboardBtn = document.getElementById('open-dashboard-btn');
+  const targetReachedBtn = document.getElementById('target-reached-btn');
 
   let statusTimer = null;
   function showStatus(message, type = 'info') {
@@ -48,6 +63,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
   document.getElementById('dashboard-btn').addEventListener('click', () => openDashboard());
   openDashboardBtn.addEventListener('click', () => openDashboard());
+  targetReachedBtn.addEventListener('click', () => openDashboard('?filter=targetReached'));
 
   function showTabStatus(message, isPositive) {
     addBtn.hidden = true;
@@ -75,11 +91,31 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     recentList.textContent = '';
     recentSection.hidden = items.length === 0;
-    if (items.length === 0) return items;
+    const targetReachedCount = items.filter((item) => {
+      const baseline = Number.isFinite(item.wishlistPriceWhenAdded)
+        ? item.wishlistPriceWhenAdded
+        : Number.isFinite(item.originalPrice)
+          ? item.originalPrice
+          : null;
+      const targetPriceReached = Number.isFinite(item.targetPrice) && Number.isFinite(item.currentPrice) && item.currentPrice <= item.targetPrice;
+      let discount = Number.isFinite(baseline) && baseline > 0 && Number.isFinite(item.currentPrice)
+        ? ((baseline - item.currentPrice) / baseline) * 100
+        : 0;
+      if (discount <= 0 && item.wishlistPriceDropPercent > 0) discount = item.wishlistPriceDropPercent;
+      const discountReached = Number.isFinite(item.targetDiscountPercentage) && discount >= item.targetDiscountPercentage;
+      return targetPriceReached || discountReached;
+    }).length;
+    targetReachedBtn.hidden = targetReachedCount === 0;
+    targetReachedBtn.textContent = `View ${targetReachedCount} Target-Reached Item${targetReachedCount === 1 ? '' : 's'}`;
+    if (items.length === 0) {
+      baselineNote.hidden = true;
+      return items;
+    }
 
     const recent = [...items]
       .map(item => {
-        const baseline = (historyObj[item.id] || []).find((dp) => Number.isFinite(dp.price))?.price || item.originalPrice;
+        const trackingBaseline = getTrackingBaseline(item, historyObj[item.id]);
+        const baseline = trackingBaseline?.price;
         let discount = 0;
         if (Number.isFinite(baseline) && Number.isFinite(item.currentPrice) && baseline > 0) {
           discount = ((baseline - item.currentPrice) / baseline) * 100;
@@ -88,7 +124,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (discount <= 0 && item.wishlistPriceDropPercent > 0) {
           discount = item.wishlistPriceDropPercent;
         }
-        return { ...item, _discount: discount };
+        return { ...item, _discount: discount, _trackingBaseline: trackingBaseline };
       })
       .sort((a, b) => {
         if (Math.abs(b._discount - a._discount) > 0.1) {
@@ -97,6 +133,12 @@ document.addEventListener('DOMContentLoaded', async () => {
         return (b.updatedAt || b.lastChecked || b.addedAt || 0) - (a.updatedAt || a.lastChecked || a.addedAt || 0);
       })
       .slice(0, RECENT_ITEMS_COUNT);
+
+    const comparedItems = recent.filter((item) => item._trackingBaseline);
+    baselineNote.hidden = comparedItems.length === 0;
+    baselineNote.textContent = comparedItems.some((item) => !item._trackingBaseline.exact)
+      ? 'Changes use the earliest retained sample when the tracking-start baseline is unavailable.'
+      : 'Changes are measured since tracking started.';
 
     recent.forEach((item) => {
       const clone = template.content.cloneNode(true);
@@ -115,13 +157,23 @@ document.addEventListener('DOMContentLoaded', async () => {
 
       // Change since tracking started; a drop is good news, so down = green.
       const changeEl = clone.querySelector('.price-change');
-      const baseline = (historyObj[item.id] || []).find((dp) => Number.isFinite(dp.price))?.price;
+      const baseline = item._trackingBaseline?.price;
       if (Number.isFinite(baseline) && Number.isFinite(item.currentPrice) && baseline > 0) {
         const pct = ((item.currentPrice - baseline) / baseline) * 100;
         if (Math.abs(pct) >= 0.5) {
           changeEl.hidden = false;
           changeEl.textContent = `${pct < 0 ? '▼' : '▲'} ${Math.abs(pct).toFixed(0)}%`;
           changeEl.className = `price-change ${pct < 0 ? 'change-down' : 'change-up'}`;
+          const baselineTimestamp = item._trackingBaseline?.timestamp;
+          if (item._trackingBaseline?.exact) {
+            changeEl.title = Number.isFinite(baselineTimestamp)
+              ? `Since tracking started on ${new Date(baselineTimestamp).toLocaleDateString()}`
+              : 'Since tracking started';
+          } else {
+            changeEl.title = Number.isFinite(baselineTimestamp)
+              ? `Since earliest retained sample on ${new Date(baselineTimestamp).toLocaleDateString()}`
+              : 'Since earliest retained sample';
+          }
         }
       }
 
@@ -141,11 +193,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   // track a non-Amazon page, an already-tracked product, or a tracked list.
   chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
     const url = tabs[0]?.url || '';
-    if (!url.includes('amazon.')) {
+    if (!parseCanonicalAmazonUrl(url)) {
       return; // Not an Amazon page: offer nothing.
     }
 
-    const asin = getAsin(url);
+    const asin = getAmazonAsin(url);
     if (asin) {
       if (items.some((item) => item.id === asin)) {
         showTabStatus('✓ Already tracking this product', true);
@@ -156,7 +208,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       return;
     }
 
-    const wishlistId = getWishlistId(url);
+    const wishlistId = getAmazonWishlistId(url);
     if (wishlistId) {
       if (trackedWishlistIds.includes(wishlistId)) {
         showTabStatus('✓ This wishlist is already tracked', true);

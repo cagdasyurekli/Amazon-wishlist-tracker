@@ -290,7 +290,7 @@ describe('Chrome extension E2E', () => {
     await page.click('.item-card[data-id="B012345678"] .chart-btn');
     await page.waitForSelector('.item-card[data-id="B012345678"] .chart-meta span');
     await expect(page.$eval('.item-card[data-id="B012345678"] .chart-meta', (node) => node.textContent)).resolves.toContain('Latest €10.99');
-    await expect(page.$eval('.item-card[data-id="B012345678"] .chart-meta', (node) => node.textContent)).resolves.toContain('2 fetches');
+    await expect(page.$eval('.item-card[data-id="B012345678"] .chart-meta', (node) => node.textContent)).resolves.toContain('2 stored samples');
     await expect(page.$$eval('.item-card[data-id="B012345678"] .chart-sample', (rows) => rows.map(row => row.textContent))).resolves.toHaveLength(2);
     await expect(page.$eval('.item-card[data-id="B012345678"] .chart-samples', (node) => node.textContent)).resolves.toContain('€10.99');
 
@@ -310,7 +310,7 @@ describe('Chrome extension E2E', () => {
     });
 
     const beforeSync = Date.now();
-    const result = await page.evaluate(async () => {
+    const result = await page.evaluate(async (baselineTimestamp) => {
       await chrome.storage.local.set({
         trackedItems: [{
           id: 'B012345678',
@@ -320,12 +320,12 @@ describe('Chrome extension E2E', () => {
           originalPrice: 12.49,
           currency: '€',
           inStock: true,
-          lastChecked: Date.UTC(2026, 5, 1, 8, 0),
-          addedAt: Date.UTC(2026, 5, 1, 8, 0)
+          lastChecked: baselineTimestamp,
+          addedAt: baselineTimestamp
         }],
         priceHistory: {
           B012345678: [
-            { price: 12.49, timestamp: Date.UTC(2026, 5, 1, 8, 0) }
+            { price: 12.49, timestamp: baselineTimestamp }
           ]
         }
       });
@@ -345,7 +345,7 @@ describe('Chrome extension E2E', () => {
       });
 
       return chrome.storage.local.get(['trackedItems', 'priceHistory']);
-    });
+    }, beforeSync - 1000);
 
     const syncedItem = result.trackedItems.find((item) => item.id === 'B012345678');
     expect(syncedItem.currentPrice).toBe(10.99);
@@ -526,7 +526,13 @@ describe('Chrome extension E2E', () => {
     });
     await page.evaluate(async () => {
       await chrome.storage.local.set({
-        trackedItems: [{ id: 'B000000001', title: 'Export me', currentPrice: 12.5, currency: '€' }],
+        trackedItems: [{
+          id: 'B000000001',
+          title: 'Export me',
+          url: 'https://www.amazon.com/dp/B000000001',
+          currentPrice: 12.5,
+          currency: '€'
+        }],
         priceHistory: { B000000001: [{ price: 12.5, timestamp: 123 }] },
         trackedWishlists: [{
           id: 'LIST-A',
@@ -535,6 +541,13 @@ describe('Chrome extension E2E', () => {
         }]
       });
       window.__savedSignalDownload = null;
+      const nativeCreateObjectUrl = URL.createObjectURL.bind(URL);
+      URL.createObjectURL = function captureBlob(blob) {
+        blob.text().then((text) => {
+          window.__savedSignalBlobPayload = JSON.parse(text);
+        });
+        return nativeCreateObjectUrl(blob);
+      };
       HTMLAnchorElement.prototype.click = function captureDownload() {
         window.__savedSignalDownload = { href: this.href, download: this.download };
       };
@@ -558,19 +571,19 @@ describe('Chrome extension E2E', () => {
     });
 
     await page.click('#export-btn');
-    await page.waitForFunction(() => Boolean(window.__savedSignalDownload));
+    await page.waitForFunction(() => Boolean(window.__savedSignalDownload && window.__savedSignalBlobPayload));
     const exported = await page.evaluate(() => {
       const { href, download } = window.__savedSignalDownload;
-      const payload = JSON.parse(decodeURIComponent(href.slice(href.indexOf(',') + 1)));
-      return { download, payload };
+      return { download, href, payload: window.__savedSignalBlobPayload };
     });
     expect(exported.download).toBe('saved_signal_backup.json');
+    expect(exported.href.startsWith('blob:')).toBe(true);
     expect(exported.payload.items).toEqual([
       expect.objectContaining({ id: 'B000000001', title: 'Export me', currentPrice: 12.5 })
     ]);
-    expect(exported.payload.history.B000000001).toEqual([{ price: 12.5, timestamp: 123 }]);
+    expect(exported.payload.history.B000000001).toEqual([]);
     expect(exported.payload.format).toBe('saved-signal-backup');
-    expect(exported.payload.version).toBe(1);
+    expect(exported.payload.version).toBe(2);
     expect(exported.payload.trackedWishlists).toEqual([
       expect.objectContaining({ id: 'LIST-A', autoSync: true })
     ]);
@@ -746,6 +759,141 @@ describe('Chrome extension E2E', () => {
     expect(remainingItems).toHaveLength(1);
     await expect(page.$eval('#settings-status', (node) => node.textContent)).resolves.toBe('Price history cleared. Price tracking continues.');
     expect(pageErrors).toEqual([]);
+  }, 30000);
+
+  it('applies an allowlisted dashboard filter temporarily and restores focus after Escape', async () => {
+    await launchExtension();
+
+    const page = await browser.newPage();
+    await page.goto(`chrome-extension://${extensionId}/src/dashboard/dashboard.html`, {
+      waitUntil: 'domcontentloaded'
+    });
+    await page.evaluate(async () => {
+      await chrome.storage.local.set({
+        trackedItems: [{
+          id: 'B000000001',
+          title: 'Reached target',
+          url: 'https://www.amazon.de/dp/B000000001',
+          currentPrice: 9,
+          targetPrice: 10,
+          currency: '€',
+          inStock: true,
+          wishlistIds: ['AMBIG_LIST', 'DE_LIST-1'],
+          addedAt: Date.now()
+        }, {
+          id: 'B000000002',
+          title: 'Still above target',
+          url: 'https://www.amazon.fr/dp/B000000002',
+          currentPrice: 20,
+          targetPrice: 10,
+          currency: '€',
+          inStock: true,
+          wishlistIds: ['AMBIG_LIST'],
+          addedAt: Date.now() - 1
+        }],
+        trackedWishlists: ['AMBIG_LIST', 'DE_LIST-1']
+      });
+      await chrome.storage.sync.set({ settings: { dashboardFilter: 'priority' } });
+    });
+
+    await page.goto(`chrome-extension://${extensionId}/src/dashboard/dashboard.html?filter=targetReached`, {
+      waitUntil: 'domcontentloaded'
+    });
+    await page.waitForSelector('.item-card');
+    await expect(page.$eval('#filter-select', (node) => node.value)).resolves.toBe('targetReached');
+    await expect(page.$$eval('.item-card', (cards) => cards.map((card) => card.dataset.id))).resolves.toEqual(['B000000001']);
+    await expect(page.evaluate(async () => (await chrome.storage.sync.get('settings')).settings.dashboardFilter)).resolves.toBe('priority');
+    await page.waitForFunction(async () => {
+      const { trackedWishlists } = await chrome.storage.local.get('trackedWishlists');
+      return trackedWishlists?.every((entry) => typeof entry === 'object');
+    });
+    await expect(page.evaluate(async () => (await chrome.storage.local.get('trackedWishlists')).trackedWishlists)).resolves.toEqual([
+      { id: 'AMBIG_LIST', url: null, autoSync: false, needsRegionReview: true },
+      { id: 'DE_LIST-1', url: 'https://www.amazon.de/hz/wishlist/ls/DE_LIST-1', autoSync: false }
+    ]);
+
+    await page.click('.item-card .chart-btn');
+    const detailsButton = await page.$('.item-card .details-btn');
+    await detailsButton.click();
+    await page.waitForSelector('#details-view:not([hidden])');
+    await page.keyboard.press('Escape');
+    await page.waitForSelector('#main-view:not([hidden])');
+    await page.waitForFunction(() => document.activeElement?.classList.contains('details-btn'));
+
+    await page.select('#filter-select', 'all');
+    await page.waitForFunction(async () => (await chrome.storage.sync.get('settings')).settings.dashboardFilter === 'all');
+    expect(new URL(page.url()).searchParams.has('filter')).toBe(false);
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await expect(page.$eval('#filter-select', (node) => node.value)).resolves.toBe('all');
+    await expect(page.$eval('#status-banner', (node) => ({
+      visible: node.classList.contains('visible'),
+      text: node.textContent
+    }))).resolves.toEqual({
+      visible: true,
+      text: '1 legacy wishlist needs the original Amazon URL before automatic sync can resume.'
+    });
+  }, 30000);
+
+  it('labels popup changes from the tracking baseline and links to reached targets', async () => {
+    await launchExtension();
+
+    const page = await browser.newPage();
+    await page.goto(`chrome-extension://${extensionId}/src/popup/popup.html`, {
+      waitUntil: 'domcontentloaded'
+    });
+    await page.evaluate(async () => {
+      const now = Date.now();
+      await chrome.storage.local.set({
+        trackedItems: [{
+          id: 'B000000001',
+          title: 'Target reached',
+          url: 'https://www.amazon.nl/dp/B000000001',
+          currentPrice: 8,
+          trackingStartPrice: 10,
+          trackingStartedAt: now - 400 * 86400000,
+          trackingBaselineExact: true,
+          targetPrice: 9,
+          currency: '€',
+          inStock: true,
+          addedAt: now
+        }],
+        priceHistory: {
+          B000000001: [
+            { price: 5, timestamp: now - 399 * 86400000 },
+            { price: 15, timestamp: now - 398 * 86400000 },
+            { price: 8, timestamp: now }
+          ]
+        }
+      });
+      window.location.reload();
+    });
+
+    await page.waitForSelector('#target-reached-btn:not([hidden])');
+    await expect(page.$eval('#baseline-note', (node) => ({ hidden: node.hidden, text: node.textContent }))).resolves.toEqual({
+      hidden: false,
+      text: 'Changes are measured since tracking started.'
+    });
+    await expect(page.$eval('.price-change', (node) => node.title)).resolves.toContain('Since tracking started');
+    await expect(page.$eval('.price-change', (node) => node.textContent)).resolves.toBe('▼ 20%');
+
+    await page.evaluate(async () => {
+      const { trackedItems } = await chrome.storage.local.get('trackedItems');
+      const { priceHistory } = await chrome.storage.local.get('priceHistory');
+      trackedItems[0].trackingStartPrice = priceHistory.B000000001[0].price;
+      trackedItems[0].trackingStartedAt = priceHistory.B000000001[0].timestamp;
+      trackedItems[0].trackingBaselineExact = false;
+      await chrome.storage.local.set({ trackedItems });
+    });
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await expect(page.$eval('#baseline-note', (node) => node.textContent)).resolves.toBe(
+      'Changes use the earliest retained sample when the tracking-start baseline is unavailable.'
+    );
+    await expect(page.$eval('.price-change', (node) => node.title)).resolves.toContain('Since earliest retained sample');
+
+    const dashboardTarget = browser.waitForTarget((target) => target.url().includes('/src/dashboard/dashboard.html?filter=targetReached'));
+    await page.click('#target-reached-btn');
+    const target = await dashboardTarget;
+    expect(target.url()).toContain('?filter=targetReached');
   }, 30000);
 
   it('keeps the popup bounded with three accessible highlights', async () => {

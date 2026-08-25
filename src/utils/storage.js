@@ -3,6 +3,8 @@
  * Wraps chrome.storage API (which natively supports Promises in MV3)
  */
 
+import { applyMissingTrackingBaselines, compactHistorySeries } from './history.mjs';
+
 export const StorageArea = {
   SYNC: 'sync',
   LOCAL: 'local'
@@ -80,11 +82,36 @@ export async function removeStorageData(key, area = StorageArea.SYNC) {
  * price is not a finite number. Shared by the popup and the background alerts.
  * @param {number} price
  * @param {string} [currency]
+ * @param {string|string[]} [locale] defaults to the browser locale
  * @returns {string}
  */
-export function formatPrice(price, currency) {
+export function formatPrice(price, currency, locale) {
   if (!Number.isFinite(price)) return 'N/A';
-  return `${currency || ''}${price.toFixed(2)}`;
+  const currencyCodes = {
+    '$': 'USD',
+    '€': 'EUR',
+    '£': 'GBP',
+    '¥': 'JPY'
+  };
+  const currencyCode = currencyCodes[currency] || (/^[A-Z]{3}$/.test(currency || '') ? currency : null);
+  try {
+    if (currencyCode) {
+      return new Intl.NumberFormat(locale, {
+        style: 'currency',
+        currency: currencyCode,
+        currencyDisplay: 'narrowSymbol',
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+      }).format(price);
+    }
+    const formatted = new Intl.NumberFormat(locale, {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    }).format(price);
+    return `${currency || ''}${formatted}`;
+  } catch (_error) {
+    return `${currency || ''}${price.toFixed(2)}`;
+  }
 }
 
 /**
@@ -158,6 +185,21 @@ export function updateTrackedItems(updater) {
     const items = await getTrackedItems();
     const next = updater(items);
     await setStorageData(StorageKeys.TRACKED_ITEMS, next, StorageArea.LOCAL);
+  });
+}
+
+/**
+ * Serializes wishlist read-modify-write operations with the other local
+ * tracking mutations in this extension context.
+ * @param {(wishlists: Array<Object|string>, items: Array<Object>) => Array<Object>} updater
+ * @returns {Promise<void>}
+ */
+export function updateTrackedWishlists(updater) {
+  return withSaveLock(async () => {
+    const wishlists = await getStorageData(StorageKeys.TRACKED_WISHLISTS, StorageArea.LOCAL) || [];
+    const items = await getTrackedItems();
+    const next = updater(Array.isArray(wishlists) ? wishlists : [], items);
+    await setStorageData(StorageKeys.TRACKED_WISHLISTS, next, StorageArea.LOCAL);
   });
 }
 
@@ -289,9 +331,29 @@ export function removeTrackedItem(id) {
  */
 export function updatePriceHistory(updater) {
   return withSaveLock(async () => {
+    const settings = await getStorageData(StorageKeys.SETTINGS, StorageArea.SYNC) || {};
     const history = await getStorageData(StorageKeys.PRICE_HISTORY, StorageArea.LOCAL) || {};
+    const items = await getTrackedItems();
+    // Capture the exact earliest sample before retention or extrema compaction
+    // can remove it. The popup then has a durable tracking-start baseline.
+    const baselines = applyMissingTrackingBaselines(items, history);
     const next = updater(history);
-    await setStorageData(StorageKeys.PRICE_HISTORY, next, StorageArea.LOCAL);
+    const compacted = { ...next };
+    for (const [id, points] of Object.entries(next || {})) {
+      if (points !== history[id]) {
+        compacted[id] = compactHistorySeries(points, {
+          retention: settings.historyRetentionDays || '30'
+        }).points;
+      }
+    }
+    if (baselines.updatedCount > 0) {
+      await setStorageItems({
+        [StorageKeys.TRACKED_ITEMS]: baselines.items,
+        [StorageKeys.PRICE_HISTORY]: compacted
+      }, StorageArea.LOCAL);
+    } else {
+      await setStorageData(StorageKeys.PRICE_HISTORY, compacted, StorageArea.LOCAL);
+    }
   });
 }
 
@@ -320,14 +382,8 @@ export function clearPriceHistory() {
 export async function prunePriceHistory() {
   const settings = await getStorageData(StorageKeys.SETTINGS, StorageArea.SYNC) || {};
   const retention = settings.historyRetentionDays || "30";
-  
-  if (retention === "forever") {
-    console.log("Price history retention is set to forever. Skipping pruning.");
-    return;
-  }
-
-  const daysToKeep = parseInt(retention, 10);
-  const cutoffTime = Date.now() - (daysToKeep * 24 * 60 * 60 * 1000);
+  const daysToKeep = retention === "forever" ? null : parseInt(retention, 10);
+  const cutoffTime = daysToKeep == null ? null : Date.now() - (daysToKeep * 24 * 60 * 60 * 1000);
 
   let prunedCount = 0;
 
@@ -338,6 +394,7 @@ export async function prunePriceHistory() {
       if (!Array.isArray(dataPoints)) continue;
 
       prunedHistory[itemId] = dataPoints.filter(dp => {
+        if (cutoffTime == null) return true;
         const keep = Number.isFinite(dp.timestamp) && dp.timestamp >= cutoffTime;
         if (!keep) prunedCount++;
         return keep;

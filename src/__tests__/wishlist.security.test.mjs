@@ -6,6 +6,7 @@ import { readFile } from 'node:fs/promises';
 const source = await readFile(new URL('../background/background.js', import.meta.url), 'utf8');
 const legacyNoticeSource = await readFile(new URL('../background/legacy_target_notice.js', import.meta.url), 'utf8');
 const partialPolicySource = await readFile(new URL('../background/wishlist_partial_policy.js', import.meta.url), 'utf8');
+const settingsSource = await readFile(new URL('../utils/settings.js', import.meta.url), 'utf8');
 
 async function loadHarness({ storedState = {}, cursor = 0, scrapeResult, trackedItems = [] } = {}) {
   const storage = new Map([
@@ -71,9 +72,23 @@ async function loadHarness({ storedState = {}, cursor = 0, scrapeResult, tracked
   );
 
   const amazonModule = new vm.SyntheticModule(
-    ['normalizeStoredAmazonProductUrl', 'sanitizeAmazonImageUrl'],
+    ['getAmazonWishlistId', 'migrateLegacyWishlistRecords', 'normalizeStoredAmazonProductUrl', 'parseCanonicalAmazonWishlistUrl', 'sanitizeAmazonImageUrl'],
     function initialize() {
+      const parseWishlist = (value) => {
+        try {
+          const parsed = new URL(value);
+          return parsed.protocol === 'https:' && /(^|\.)amazon\.(com|nl|de|fr|es|it|co\.uk)$/i.test(parsed.hostname) &&
+            /\/(?:hz\/)?wishlist\/ls\/[a-z0-9_-]{1,64}(?:[/?#]|$)/i.test(parsed.pathname)
+            ? parsed
+            : null;
+        } catch { return null; }
+      };
+      this.setExport('getAmazonWishlistId', (value) =>
+        parseWishlist(value)?.pathname.match(/\/(?:hz\/)?wishlist\/ls\/([a-z0-9_-]{1,64})(?:[/?#]|$)/i)?.[1] || null
+      );
+      this.setExport('migrateLegacyWishlistRecords', (wishlists) => wishlists.map((entry) => ({ ...entry })));
       this.setExport('normalizeStoredAmazonProductUrl', () => null);
+      this.setExport('parseCanonicalAmazonWishlistUrl', parseWishlist);
       this.setExport('sanitizeAmazonImageUrl', () => '');
     },
     { context }
@@ -96,7 +111,7 @@ async function loadHarness({ storedState = {}, cursor = 0, scrapeResult, tracked
   };
   const StorageArea = { LOCAL: 'local', SYNC: 'sync' };
   const storageModule = new vm.SyntheticModule(
-    ['getTrackedItems', 'saveTrackedItem', 'updateTrackedItems', 'updateTrackedItemsIf', 'updateTrackedItemsWithFinalizer', 'replaceTrackingData', 'updatePriceHistory', 'clearPriceHistory', 'getStorageData', 'setStorageData', 'setStorageItems', 'formatPrice', 'prunePriceHistory', 'StorageKeys', 'StorageArea'],
+    ['getTrackedItems', 'saveTrackedItem', 'updateTrackedItems', 'updateTrackedItemsIf', 'updateTrackedItemsWithFinalizer', 'updateTrackedWishlists', 'replaceTrackingData', 'updatePriceHistory', 'clearPriceHistory', 'getStorageData', 'setStorageData', 'setStorageItems', 'formatPrice', 'prunePriceHistory', 'StorageKeys', 'StorageArea'],
     function initialize() {
       this.setExport('getTrackedItems', async () => storage.get('trackedItems') || []);
       this.setExport('saveTrackedItem', async () => {});
@@ -123,6 +138,12 @@ async function loadHarness({ storedState = {}, cursor = 0, scrapeResult, tracked
           throw error;
         }
       });
+      this.setExport('updateTrackedWishlists', async (updater) => {
+        storage.set(
+          'trackedWishlists',
+          updater(storage.get('trackedWishlists') || [], storage.get('trackedItems') || [])
+        );
+      });
       this.setExport('updatePriceHistory', async (updater) => {
         storage.set('priceHistory', updater(storage.get('priceHistory') || {}));
       });
@@ -143,6 +164,7 @@ async function loadHarness({ storedState = {}, cursor = 0, scrapeResult, tracked
 
   const legacyNoticeModule = new vm.SourceTextModule(legacyNoticeSource, { context });
   const partialPolicyModule = new vm.SourceTextModule(partialPolicySource, { context });
+  const settingsModule = new vm.SourceTextModule(settingsSource, { context });
   const backupModule = new vm.SyntheticModule(
     ['validateBackupPayload'],
     function initialize() { this.setExport('validateBackupPayload', (backup) => backup); },
@@ -155,6 +177,7 @@ async function loadHarness({ storedState = {}, cursor = 0, scrapeResult, tracked
     if (specifier === '../utils/storage.js') return storageModule;
     if (specifier === '../utils/amazon.js') return amazonModule;
     if (specifier === '../utils/backup.js') return backupModule;
+    if (specifier === '../utils/settings.js') return settingsModule;
     if (specifier === './legacy_target_notice.js') return legacyNoticeModule;
     if (specifier === './wishlist_partial_policy.js') return partialPolicyModule;
     throw new Error(`Unexpected import: ${specifier}`);

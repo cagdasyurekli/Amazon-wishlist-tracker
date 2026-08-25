@@ -1,7 +1,13 @@
 import { scrapeAmazonProduct, scrapeAmazonWishlist, closeOffscreenDocument } from './scraper.js';
-import { getTrackedItems, saveTrackedItem, updateTrackedItems, updateTrackedItemsWithFinalizer, replaceTrackingData, updatePriceHistory, clearPriceHistory, getStorageData, setStorageData, setStorageItems, formatPrice, prunePriceHistory, StorageKeys, StorageArea } from '../utils/storage.js';
-import { normalizeStoredAmazonProductUrl, sanitizeAmazonImageUrl } from '../utils/amazon.js';
+import { getTrackedItems, saveTrackedItem, updateTrackedItems, updateTrackedItemsWithFinalizer, updateTrackedWishlists, replaceTrackingData, updatePriceHistory, clearPriceHistory, getStorageData, setStorageData, setStorageItems, formatPrice, prunePriceHistory, StorageKeys, StorageArea } from '../utils/storage.js';
+import { getAmazonWishlistId, migrateLegacyWishlistRecords, normalizeStoredAmazonProductUrl, parseCanonicalAmazonWishlistUrl, sanitizeAmazonImageUrl } from '../utils/amazon.js';
 import { validateBackupPayload } from '../utils/backup.js';
+import {
+  applySettingsPatch,
+  DASHBOARD_SETTINGS_FIELDS,
+  OPTIONS_SETTINGS_FIELDS,
+  validateSettingsPatch
+} from '../utils/settings.js';
 import './legacy_target_notice.js';
 import './wishlist_partial_policy.js';
 
@@ -27,6 +33,7 @@ const {
   isLegacyTargetNoticeNotification
 } = globalThis.LegacyTargetNotice;
 let legacyTargetNoticeQueue = Promise.resolve();
+let settingsWriteQueue = Promise.resolve();
 
 const STANDARD_PRICE_ALARM = 'checkPricesAlarm';
 const STANDARD_BATCH_DELAY_MS = 30 * 1000;
@@ -73,6 +80,47 @@ function queueLegacyTargetUpgradeNotice() {
   const run = legacyTargetNoticeQueue.then(maybeNotifyLegacyTargetUpgrade);
   legacyTargetNoticeQueue = run.catch(() => {});
   return run;
+}
+
+async function migrateLegacyWishlistRegions() {
+  try {
+    const storedWishlists = await getStorageData(StorageKeys.TRACKED_WISHLISTS, StorageArea.LOCAL) || [];
+    if (!Array.isArray(storedWishlists) || !storedWishlists.some((entry) => typeof entry === 'string')) {
+      return Array.isArray(storedWishlists) ? storedWishlists : [];
+    }
+    let migrated = [];
+    await updateTrackedWishlists((latest, items) => {
+      migrated = migrateLegacyWishlistRecords(latest, items);
+      return migrated;
+    });
+    return migrated;
+  } catch (error) {
+    console.warn('Could not migrate legacy wishlist regions; automatic sync remains disabled for them:', error);
+    throw error;
+  }
+}
+
+async function upsertTrackedWishlist(rawUrl, autoSync) {
+  const parsed = parseCanonicalAmazonWishlistUrl(rawUrl);
+  const wishlistId = parsed ? getAmazonWishlistId(parsed.href) : null;
+  if (!wishlistId || (autoSync != null && typeof autoSync !== 'boolean')) {
+    throw new Error('Invalid tracked wishlist update.');
+  }
+  const canonicalUrl = `https://${parsed.hostname.toLowerCase()}/hz/wishlist/ls/${wishlistId}`;
+  let updated = [];
+  await updateTrackedWishlists((latest, items) => {
+    updated = migrateLegacyWishlistRecords(latest, items, canonicalUrl);
+    const existing = updated.find((entry) => entry?.id === wishlistId);
+    if (existing) {
+      existing.url = canonicalUrl;
+      if (autoSync != null) existing.autoSync = autoSync;
+      delete existing.needsRegionReview;
+    } else {
+      updated.push({ id: wishlistId, url: canonicalUrl, autoSync: Boolean(autoSync) });
+    }
+    return updated;
+  });
+  return updated;
 }
 
 function productAsinFromUrl(url) {
@@ -237,6 +285,31 @@ function isAuthorizedOptionsSender(sender) {
   }
 }
 
+function settingsFieldsForSender(sender) {
+  if (isAuthorizedOptionsSender(sender)) return OPTIONS_SETTINGS_FIELDS;
+  if (isAuthorizedDashboardSender(sender)) return DASHBOARD_SETTINGS_FIELDS;
+  return null;
+}
+
+export function enqueueSettingsWrite(job) {
+  const run = settingsWriteQueue.then(job);
+  settingsWriteQueue = run.catch(() => {});
+  return run;
+}
+
+async function patchSettings(message, sender) {
+  const allowedFields = settingsFieldsForSender(sender);
+  if (!allowedFields) throw new Error('Unauthorized settings update.');
+  const patch = validateSettingsPatch(message, allowedFields);
+
+  return enqueueSettingsWrite(async () => {
+    const currentSettings = await getStorageData(StorageKeys.SETTINGS, StorageArea.SYNC) || {};
+    const nextSettings = applySettingsPatch(currentSettings, patch);
+    await setStorageData(StorageKeys.SETTINGS, nextSettings, StorageArea.SYNC);
+    return nextSettings;
+  });
+}
+
 async function acknowledgeLegacyTargetPrice(expectedTargetPrice) {
   const latestSettings = await getStorageData(StorageKeys.SETTINGS, StorageArea.SYNC) || {};
   const latestTargetPrice = Number(latestSettings.defaultTargetPrice);
@@ -304,15 +377,18 @@ chrome.runtime.onInstalled.addListener(() => {
   ensureAlarms();
   updateBadgeCount();
   queueLegacyTargetUpgradeNotice();
+  migrateLegacyWishlistRegions().catch(() => {});
 });
 chrome.runtime.onStartup.addListener(() => {
   ensureAlarms();
   updateBadgeCount();
   queueLegacyTargetUpgradeNotice();
+  migrateLegacyWishlistRegions().catch(() => {});
 });
 ensureAlarms();
 updateBadgeCount();
 queueLegacyTargetUpgradeNotice();
+migrateLegacyWishlistRegions().catch(() => {});
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
   if (
@@ -402,6 +478,50 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (message.type === 'PATCH_SETTINGS') {
+    (async () => {
+      try {
+        const settings = await patchSettings(message, sender);
+        sendResponse({ success: true, settings });
+      } catch (err) {
+        sendResponse({ error: err.message || 'Failed to update settings.' });
+      }
+    })();
+    return true;
+  }
+
+  if (message.type === 'MIGRATE_LEGACY_WISHLISTS') {
+    (async () => {
+      try {
+        if (!isAuthorizedDashboardSender(sender)) {
+          sendResponse({ error: 'Unauthorized wishlist migration.' });
+          return;
+        }
+        const wishlists = await migrateLegacyWishlistRegions();
+        sendResponse({ success: true, wishlists });
+      } catch (err) {
+        sendResponse({ error: err.message || 'Failed to migrate legacy wishlists.' });
+      }
+    })();
+    return true;
+  }
+
+  if (message.type === 'UPSERT_TRACKED_WISHLIST') {
+    (async () => {
+      try {
+        if (!isAuthorizedDashboardSender(sender)) {
+          sendResponse({ error: 'Unauthorized wishlist update.' });
+          return;
+        }
+        const wishlists = await upsertTrackedWishlist(message.url, message.autoSync);
+        sendResponse({ success: true, wishlists });
+      } catch (err) {
+        sendResponse({ error: err.message || 'Failed to update tracked wishlist.' });
+      }
+    })();
+    return true;
+  }
+
   if (message.type === 'MIGRATE_LEGACY_TARGET_PRICE') {
     (async () => {
       try {
@@ -418,50 +538,55 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           return;
         }
 
-        const latestSettings = await getStorageData(StorageKeys.SETTINGS, StorageArea.SYNC) || {};
-        const latestLegacyTarget = Number(latestSettings.defaultTargetPrice);
-        if (!Object.hasOwn(latestSettings, 'defaultTargetPrice') ||
-            !Number.isFinite(latestLegacyTarget) || latestLegacyTarget !== targetPrice) {
-          sendResponse({ error: 'The previous target changed. Reload Extension Settings and review it again.' });
-          return;
-        }
-
-        const result = await updateTrackedItemsWithFinalizer((items) => {
-          const itemCurrencies = items.map((item) => typeof item.currency === 'string' ? item.currency.trim() : '');
-          const allItemsShareRequestedCurrency =
-            items.length > 0 &&
-            itemCurrencies.every(Boolean) &&
-            new Set(itemCurrencies).size === 1 &&
-            itemCurrencies[0] === currency;
-          const eligibleCount = items.filter((item) => !Number.isFinite(item.targetPrice)).length;
-          if (!allItemsShareRequestedCurrency || eligibleCount !== expectedCount) {
-            return { commit: false, result: { error: 'Legacy target can no longer be copied safely.' } };
+        const transaction = await enqueueSettingsWrite(async () => {
+          const latestSettings = await getStorageData(StorageKeys.SETTINGS, StorageArea.SYNC) || {};
+          const latestLegacyTarget = Number(latestSettings.defaultTargetPrice);
+          if (!Object.hasOwn(latestSettings, 'defaultTargetPrice') ||
+              !Number.isFinite(latestLegacyTarget) || latestLegacyTarget !== targetPrice) {
+            return { result: { error: 'The previous target changed. Reload Extension Settings and review it again.' } };
           }
 
-          const dueNow = Date.now();
-          return {
-            commit: true,
-            items: items.map((item) => Number.isFinite(item.targetPrice)
-              ? item
-              : {
-                  ...item,
-                  targetPrice,
-                  updatedAt: dueNow,
-                  nextPriceCheckAt: dueNow,
-                  checkCadence: 'Legacy target migration · due now'
-                }),
-            result: { updated: eligibleCount }
-          };
-        }, async () => {
-          const acknowledgement = await acknowledgeLegacyTargetPrice(targetPrice);
-          if (acknowledgement.error) throw new Error(acknowledgement.error);
+          let acknowledgedSettings;
+          const result = await updateTrackedItemsWithFinalizer((items) => {
+            const itemCurrencies = items.map((item) => typeof item.currency === 'string' ? item.currency.trim() : '');
+            const allItemsShareRequestedCurrency =
+              items.length > 0 &&
+              itemCurrencies.every(Boolean) &&
+              new Set(itemCurrencies).size === 1 &&
+              itemCurrencies[0] === currency;
+            const eligibleCount = items.filter((item) => !Number.isFinite(item.targetPrice)).length;
+            if (!allItemsShareRequestedCurrency || eligibleCount !== expectedCount) {
+              return { commit: false, result: { error: 'Legacy target can no longer be copied safely.' } };
+            }
+
+            const dueNow = Date.now();
+            return {
+              commit: true,
+              items: items.map((item) => Number.isFinite(item.targetPrice)
+                ? item
+                : {
+                    ...item,
+                    targetPrice,
+                    updatedAt: dueNow,
+                    nextPriceCheckAt: dueNow,
+                    checkCadence: 'Legacy target migration · due now'
+                  }),
+              result: { updated: eligibleCount }
+            };
+          }, async () => {
+            const acknowledgement = await acknowledgeLegacyTargetPrice(targetPrice);
+            if (acknowledgement.error) throw new Error(acknowledgement.error);
+            acknowledgedSettings = acknowledgement.settings;
+          });
+          return { result, settings: acknowledgedSettings };
         });
+        const { result, settings } = transaction;
         if (result?.error) {
           sendResponse({ error: result.error });
           return;
         }
         await scheduleStandardPriceCheck();
-        sendResponse({ success: true, updated: result?.updated });
+        sendResponse({ success: true, updated: result?.updated, settings });
       } catch (err) {
         sendResponse({ error: err.message || 'Failed to migrate legacy target.' });
       }
@@ -481,12 +606,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           sendResponse({ error: 'Invalid legacy target acknowledgement.' });
           return;
         }
-        const result = await acknowledgeLegacyTargetPrice(targetPrice);
+        const result = await enqueueSettingsWrite(() => acknowledgeLegacyTargetPrice(targetPrice));
         if (result.error) {
           sendResponse({ error: result.error });
           return;
         }
-        sendResponse({ success: true });
+        sendResponse({ success: true, settings: result.settings });
       } catch (err) {
         sendResponse({ error: err.message || 'Failed to acknowledge legacy target.' });
       }
@@ -502,9 +627,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           return;
         }
         const validated = validateBackupPayload(message.backup);
-        // Restore is a replacement boundary. Queue it behind any in-flight
-        // network job so a stale scrape cannot commit after the replacement.
-        await enqueueScrapeJob(() => replaceTrackingData(validated));
+        // Restore changes both Local tracking data and Sync settings. Hold the
+        // settings queue while it waits for older scrape work and commits so a
+        // preference patch cannot interleave with the replacement transaction.
+        await enqueueSettingsWrite(() => enqueueScrapeJob(() => replaceTrackingData(validated)));
         try {
           await chrome.alarms.clear(WISHLIST_CONTINUE_ALARM);
           await scheduleStandardPriceCheck();
@@ -512,7 +638,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         } catch (maintenanceError) {
           console.warn('Backup restored, but follow-up scheduling will retry later:', maintenanceError);
         }
-        sendResponse({ success: true, summary: validated.summary });
+        sendResponse({ success: true, summary: validated.summary, settings: validated.settings });
       } catch (err) {
         sendResponse({ error: err.message || 'Failed to restore backup.' });
       }
@@ -558,7 +684,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         // Apply the user's default discount alert (configured in Options) so the
         // setting actually takes effect on newly tracked items.
         const settings = await getStorageData(StorageKeys.SETTINGS, StorageArea.SYNC) || {};
-        const item = { ...validated.item, trackedIndividually: true };
+        const trackedAt = Date.now();
+        const item = {
+          ...validated.item,
+          trackedIndividually: true,
+          trackingStartPrice: validated.item.currentPrice,
+          trackingStartedAt: trackedAt,
+          trackingBaselineExact: true
+        };
         if (settings.defaultDiscount && !item.targetDiscountPercentage) {
           item.targetDiscountPercentage = parseInt(settings.defaultDiscount, 10);
         }
@@ -712,7 +845,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                   ...newItem,
                   addedAt: checkedAt,
                   lastChecked: checkedAt,
-                  updatedAt: checkedAt
+                  updatedAt: checkedAt,
+                  trackingStartPrice: newItem.currentPrice,
+                  trackingStartedAt: checkedAt,
+                  trackingBaselineExact: true
                 };
                 if (defaultDiscount && !itemToSave.targetDiscountPercentage) {
                   itemToSave.targetDiscountPercentage = defaultDiscount;
@@ -1129,7 +1265,11 @@ export async function runWishlistCheckBatch() {
     getStorageData(StorageKeys.WISHLIST_SCRAPE_CURSOR, StorageArea.LOCAL),
     getStorageData(StorageKeys.WISHLIST_SCRAPE_STATE, StorageArea.LOCAL)
   ]);
-  const wishlists = trackedWishlists || [];
+  // Legacy string entries do not retain their marketplace. Never guess .com;
+  // only structured records with a real URL may trigger background traffic.
+  const wishlists = (trackedWishlists || []).filter((entry) =>
+    entry && typeof entry === 'object' && typeof entry.url === 'string' && entry.url
+  );
   const historyObj = storedHistory || {};
   const historyBaselineLengths = captureHistoryLengths(historyObj);
   const effectiveSettings = settings || {};
@@ -1150,16 +1290,13 @@ export async function runWishlistCheckBatch() {
   const removedIds = new Set();
   const startCursor = Number.isInteger(cursorValue) ? cursorValue % wishlists.length : 0;
   const wl = wishlists[startCursor];
-  const wishlistId = typeof wl === 'string' ? wl : wl.id;
-  const url = typeof wl === 'string'
-    ? `https://www.amazon.com/hz/wishlist/ls/${wl}?viewType=list`
-    : wl.url;
+  const wishlistId = wl.id;
+  const url = wl.url;
   const stateKey = wishlistId || url;
   const syncState = storedSyncState && typeof storedSyncState === 'object' && !Array.isArray(storedSyncState)
     ? storedSyncState
     : {};
   const activeStateKeys = new Set(wishlists.map((entry) => {
-    if (typeof entry === 'string') return entry;
     return entry?.id || entry?.url;
   }).filter(Boolean));
   for (const key of Object.keys(syncState)) {
@@ -1391,7 +1528,7 @@ export function processScrapeResult(item, result, historyObj, timestamp = Date.n
 
   // 1. Target Price Alert
   const targetPrice = item.targetPrice;
-  if (targetPrice && currentPrice <= targetPrice && (previousPrice == null || previousPrice > targetPrice)) {
+  if (targetPrice && previousPrice != null && currentPrice <= targetPrice && previousPrice > targetPrice) {
     alertTriggered = true;
     alertMessage = `Price dropped to or below your target of ${formatPrice(targetPrice, item.currency)}! Now: ${formatPrice(currentPrice, item.currency)}`;
   }
@@ -1406,7 +1543,7 @@ export function processScrapeResult(item, result, historyObj, timestamp = Date.n
       currentDiscount = result.wishlistPriceDropPercent;
     }
     
-    if (currentDiscount >= targetDiscount && (previousPrice == null || previousPrice > currentPrice)) {
+    if (currentDiscount >= targetDiscount && previousPrice != null && previousPrice > currentPrice) {
       alertTriggered = true;
       alertMessage = `Discount reached ${currentDiscount.toFixed(1)}%! Now: ${formatPrice(currentPrice, item.currency)}`;
     }
