@@ -31,3 +31,13 @@ Add parser fixtures when Amazon markup changes. UI changes should cover keyboard
 Keep changes focused. Include a concise summary, tests run, risk or privacy implications, and screenshots for visible UI changes. Do not include real wishlists, exports, credentials, cookies, or personal data in fixtures, logs, screenshots, or issues.
 
 Report suspected vulnerabilities privately according to `SECURITY.md`.
+
+## Issues and support
+
+Use the repository's issue chooser so bug reports, feature requests, and support
+questions collect the right evidence. Search existing issues first and keep each issue
+focused on one problem or proposal. General installation and usage questions belong in
+the support form; suspected product defects belong in the bug form.
+
+Never use a public issue for a suspected security vulnerability or private shopping
+data. Follow `SECURITY.md` for private reporting.

@@ -70,12 +70,14 @@ npm run release:check
 
 ## Public project guidance
 
+- Documentation index: [docs/README.md](docs/README.md)
 - Security policy and reporting: [SECURITY.md](SECURITY.md)
 - Privacy and data lifecycle: [PRIVACY.md](PRIVACY.md)
 - Release history: [CHANGELOG.md](CHANGELOG.md)
 - Stable-candidate acceptance: [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md)
 - Contributions and local verification: [CONTRIBUTING.md](CONTRIBUTING.md)
 - User support: [SUPPORT.md](SUPPORT.md)
+- Issue chooser: [bug reports, feature requests, and support](https://github.com/cagdasyurekli/Amazon-wishlist-tracker/issues/new/choose)
 - Community conduct: [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
 - Chrome Web Store scope decision: [CHROMEWEBSTORE.md](CHROMEWEBSTORE.md)
 - Installation, usage, migration, and troubleshooting: [docs/USER_MANUAL.md](docs/USER_MANUAL.md)
