@@ -11,12 +11,13 @@ This document defines the expected behavior of all features in the Amazon Wishli
 ### 1.1 Individual Product Tracking
 - **Injection:** A "Track price" control is automatically injected onto supported Amazon product pages near the Buy Box inside a closed Shadow DOM. Only a genuine user activation on a matching HTTPS product page can add the item.
 - **Current Tab Tracking:** Users can track the current Amazon product tab directly from the extension popup.
-- **Validation:** The extension must validate that the URL matches an allowed Amazon regional domain (`.com`, `.nl`, `.de`, `.fr`, `.es`, `.it`, `.co.uk`).
-- **Data Extracted:** The extension extracts the product ID (ASIN), title, current price, original price (if available), currency symbol, stock status, and product image.
-- **Availability Classification:** Stock and wishlist-unavailable text is normalized and classified with unavailable wording taking precedence over available wording. English, Dutch, German, French, Spanish, and Italian marketplace phrases are supported. Unrecognized product availability is not treated as verified in stock; wishlist rows retain their existing fallback unless an unavailable phrase is present.
+- **Validation:** The extension must validate that the URL matches an allowed Amazon regional domain (`.com`, `.com.tr`, `.nl`, `.de`, `.fr`, `.es`, `.it`, `.co.uk`).
+- **Data Extracted:** The extension extracts the product ID (ASIN), title, bounded author names when Amazon exposes a product byline, current price, original price (if available), currency symbol, stock status, and product image.
+- **Availability Classification:** Stock and wishlist-unavailable text is normalized and classified with unavailable wording taking precedence over available wording. English, Dutch, German, French, Spanish, Italian, and Turkish marketplace phrases are supported. Unrecognized product availability is not treated as verified in stock; wishlist rows retain their existing fallback unless an unavailable phrase is present.
 
 ### 1.2 Wishlist Tracking & Syncing
 - **Import Flow:** Users can import a public/shared Amazon wishlist URL via the Dashboard or the Popup.
+- **Wishlist Identity:** Wishlist IDs are bounded to one path segment of at most 64 ASCII alphanumeric, `_`, `-`, or `=` characters. The `=` character is required by observed Amazon Turkey list URLs and does not broaden the allowed host, scheme, path, or redirect policy.
 - **Data Extracted:** Extracts all visible items from the wishlist, including native Amazon price-drop data (`wishlistPriceDropPercent`, `wishlistPriceWhenAdded`, `wishlistPriceDropAmount`, `wishlistPriceDropText`).
 - **Keep List in Sync:** Wishlists can periodically add newly discovered products and stop tracking products removed from that wishlist. Products also tracked individually or through another wishlist are preserved.
 - **Reconciliation Identity:** Destructive reconciliation requires a complete page bound to the requested wishlist by a matching list identifier or canonical document identity. Identity-less rows may be shown for non-destructive extraction but cannot authorize removals.
@@ -85,7 +86,7 @@ This document defines the expected behavior of all features in the Amazon Wishli
 - **Purpose:** Full data management and detailed analysis.
 - **Features:**
   - Displays all tracked items in a grid/list.
-  - Allows persistent sorting, text searching, and filters for price drops, priority, stock, reached targets, and unchecked products.
+  - Allows persistent sorting, text searching by title, author name, ASIN, stock status, or target state, and filters for price drops, priority, stock, reached targets, and unchecked products. Existing products gain author metadata after a supported product-page track or successful background product refresh.
   - Accepts only allowlisted dashboard filter query values. A query-provided filter is temporary and does not overwrite the remembered preference unless the user changes the filter.
   - Progressively renders 50 products at a time with "Load More" pagination that preserves scroll position. Chart metadata and canvases are created only when charts are opened.
   - Wishlist selection shows at most 50 products per page while preserving selection across pages. “Select All” applies to the complete extracted wishlist, not only the visible page.

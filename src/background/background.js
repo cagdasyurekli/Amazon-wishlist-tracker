@@ -11,11 +11,13 @@ import {
 import './legacy_target_notice.js';
 import './wishlist_partial_policy.js';
 
-const AMAZON_HOST_PATTERN = /(^|\.)amazon\.(com|nl|de|fr|es|it|co\.uk)$/i;
+const AMAZON_HOST_PATTERN = /(^|\.)amazon\.(com(?:\.tr)?|nl|de|fr|es|it|co\.uk)$/i;
 const ASIN_PATTERN = /^[A-Z0-9]{10}$/;
 const PRODUCT_PATH_PATTERN = /\/(?:dp|gp\/product)\/([A-Z0-9]{10})(?:[/?]|$)/i;
 const MAX_TRACKED_ITEMS = 5000;
 const MAX_TITLE_LENGTH = 300;
+const MAX_PRODUCT_AUTHORS = 20;
+const MAX_AUTHOR_LENGTH = 160;
 const MAX_URL_LENGTH = 2048;
 const MAX_PRICE_VALUE = 1_000_000_000;
 const ADD_RATE_WINDOW_MS = 1500;
@@ -145,6 +147,22 @@ function optionalBoundedNumber(value, fieldName, { min = 0, max = MAX_PRICE_VALU
   return value;
 }
 
+function sanitizeAuthors(value, fallback = []) {
+  const source = value == null ? fallback : value;
+  if (!Array.isArray(source) || source.length > MAX_PRODUCT_AUTHORS) {
+    throw new Error('Invalid product authors.');
+  }
+  const authors = source.map((entry) => {
+    if (typeof entry !== 'string') throw new Error('Invalid product authors.');
+    const normalized = entry.replace(/\s+/g, ' ').trim();
+    if (!normalized || normalized.length > MAX_AUTHOR_LENGTH) {
+      throw new Error('Invalid product authors.');
+    }
+    return normalized;
+  });
+  return [...new Set(authors)];
+}
+
 function sanitizeBulkTrackedItem(rawItem, fallbackItem = null) {
   if (!rawItem || typeof rawItem !== 'object' || Array.isArray(rawItem)) {
     throw new Error('Invalid wishlist item.');
@@ -160,7 +178,7 @@ function sanitizeBulkTrackedItem(rawItem, fallbackItem = null) {
   const currency = currencySource == null ? null : String(currencySource).trim();
   if (currency && currency.length > 8) throw new Error('Invalid wishlist currency.');
   const wishlistIds = Array.isArray(rawItem.wishlistIds)
-    ? [...new Set(rawItem.wishlistIds.filter((value) => typeof value === 'string' && /^[a-z0-9_-]{1,64}$/i.test(value)))].slice(0, 20)
+    ? [...new Set(rawItem.wishlistIds.filter((value) => typeof value === 'string' && /^[a-z0-9_=-]{1,64}$/i.test(value)))].slice(0, 20)
     : (Array.isArray(fallbackItem?.wishlistIds) ? fallbackItem.wishlistIds.slice(0, 20) : []);
   const dropText = typeof rawItem.wishlistPriceDropText === 'string'
     ? rawItem.wishlistPriceDropText.replace(/\s+/g, ' ').trim().slice(0, 500)
@@ -169,6 +187,7 @@ function sanitizeBulkTrackedItem(rawItem, fallbackItem = null) {
   return {
     id,
     title,
+    authors: sanitizeAuthors(rawItem.authors, fallbackItem?.authors),
     url,
     imageUrl: sanitizeAmazonImageUrl(rawItem.imageUrl || fallbackItem?.imageUrl || '', url),
     currentPrice: optionalBoundedNumber(rawItem.currentPrice ?? fallbackItem?.currentPrice, 'wishlist current price'),
@@ -234,6 +253,7 @@ export function validateAddTrackedItemRequest(message, sender) {
     item: {
       id: itemAsin,
       title,
+      authors: sanitizeAuthors(rawItem.authors),
       url: `${itemUrl.origin}/dp/${itemAsin}`,
       currentPrice: boundedPrice(rawItem.currentPrice, 'current price'),
       currency: rawItem.currency || null,
@@ -859,7 +879,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 return;
               }
 
-              for (const field of ['title', 'currentPrice', 'currency', 'inStock']) {
+              for (const field of ['title', 'authors', 'currentPrice', 'currency', 'inStock']) {
                 if (newItem[field] != null) existingItem[field] = newItem[field];
               }
               if (newItem.url) existingItem.url = newItem.url;
@@ -914,7 +934,7 @@ const ADAPTIVE_INTERVALS = {
 };
 
 const SCRAPE_OWNED_FIELDS = [
-  'title', 'url', 'imageUrl', 'currentPrice', 'originalPrice', 'currency',
+  'title', 'authors', 'url', 'imageUrl', 'currentPrice', 'originalPrice', 'currency',
   'inStock', 'lastChecked', 'updatedAt', 'wasInStockPreviously', 'buyBoxPrice',
   'salesRank', 'wishlistPriceDropPercent', 'wishlistPriceWhenAdded',
   'wishlistPriceDropAmount', 'wishlistPriceDropText',
@@ -1367,6 +1387,7 @@ export async function runWishlistCheckBatch() {
                 wishlistPriceWhenAdded: extractedItem.wishlistPriceWhenAdded,
                 wishlistPriceDropAmount: extractedItem.wishlistPriceDropAmount,
                 wishlistPriceDropText: extractedItem.wishlistPriceDropText,
+                authors: extractedItem.authors,
                 inStock: extractedItem.inStock,
                 isPurchased: extractedItem.isPurchased,
                 buyBoxPrice: null,
@@ -1383,6 +1404,7 @@ export async function runWishlistCheckBatch() {
                   id: extractedItem.id,
                   url: extractedItem.url,
                   title: extractedItem.title,
+                  authors: extractedItem.authors,
                   addedAt: now,
                   updatedAt: now,
                   lastChecked: now,
@@ -1486,6 +1508,7 @@ async function clearBackoff() {
 }
 
 export function processScrapeResult(item, result, historyObj, timestamp = Date.now(), settings = {}) {
+  if (Array.isArray(result.authors) && result.authors.length > 0) item.authors = result.authors;
   if (result.price == null) {
     console.warn(`Skipping history and price alerts for ${item.id}: no price found.`);
     item.inStock = result.inStock;

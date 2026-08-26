@@ -29,6 +29,47 @@ describe('Amazon HTML Parser (Offscreen Worker)', () => {
     expect(unavailableData.inStock).toBe(false);
   });
 
+  it('parses an available amazon.com.tr product price and currency', () => {
+    const data = parseAmazonHtml(`
+      <html><body>
+        <span id="productTitle">Türkiye Product</span>
+        <div id="bylineInfo"><span class="author"><a class="contributorNameID">Ayşe Yılmaz</a></span></div>
+        <div id="corePrice_feature_div"><span class="a-offscreen">1.299,00 TL</span></div>
+        <div id="availability"><span>Stokta sadece 4 adet kaldı.</span></div>
+      </body></html>
+    `, 'https://www.amazon.com.tr/dp/B000000001');
+
+    expect(data.price).toBe(1299);
+    expect(data.currency).toBe('₺');
+    expect(data.inStock).toBe(true);
+    expect(data.authors).toEqual(['Ayşe Yılmaz']);
+  });
+
+  it('parses an unavailable amazon.com.tr wishlist row without changing its origin', () => {
+    const data = parseAmazonWishlist(`
+      <html><body>
+        <input name="listId" value="LIST1">
+        <div id="g-items">
+          <li data-itemid="ITEM1">
+            <a id="itemName_B000000001" href="/dp/B000000001">Türkiye Wishlist Product</a>
+            <span id="item-byline_ITEM1"><a>Mehmet Demir</a></span>
+            <span class="a-price"><span class="a-offscreen">109,00 TL</span></span>
+            <span>Şu anda mevcut değil.</span>
+          </li>
+        </div>
+      </body></html>
+    `, 'https://www.amazon.com.tr/hz/wishlist/ls/LIST1');
+
+    expect(data.completeness).toBe('validated');
+    expect(data.items[0]).toMatchObject({
+      url: 'https://www.amazon.com.tr/dp/B000000001',
+      currentPrice: 109,
+      currency: '₺',
+      inStock: false
+    });
+    expect(data.items[0].authors).toEqual(['Mehmet Demir']);
+  });
+
   it('should throw an error if a CAPTCHA is detected via the title', () => {
     const html = `
       <html>
@@ -67,6 +108,7 @@ describe('Amazon HTML Parser (Offscreen Worker)', () => {
         <head><title>Some Product</title></head>
         <body>
           <span id="productTitle">   Test Product Title   </span>
+          <div id="bylineInfo"><span class="author"><a class="contributorNameID">Virginia Evans</a></span></div>
           <div id="corePrice_feature_div">
             <span class="a-offscreen">$49.99</span>
           </div>
@@ -86,6 +128,7 @@ describe('Amazon HTML Parser (Offscreen Worker)', () => {
     expect(data.buyBoxPrice).toBe(49.99);
     expect(data.inStock).toBe(true);
     expect(data.soldByAmazon).toBe(true);
+    expect(data.authors).toEqual(['Virginia Evans']);
   });
 
   it('should mark items as purchased if purchased text exists on the page', () => {

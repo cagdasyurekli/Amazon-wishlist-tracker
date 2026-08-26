@@ -17,10 +17,12 @@ export const BACKUP_VERSION = 2;
 export const MAX_BACKUP_BYTES = 32 * 1024 * 1024;
 
 const ASIN_PATTERN = /^[A-Z0-9]{10}$/;
-const WISHLIST_ID_PATTERN = /^[a-z0-9_-]{1,64}$/i;
+const WISHLIST_ID_PATTERN = /^[a-z0-9_=-]{1,64}$/i;
 const MAX_ITEMS = 5000;
 const MAX_WISHLISTS = 500;
 const MAX_PRICE = 1_000_000_000;
+const MAX_PRODUCT_AUTHORS = 20;
+const MAX_AUTHOR_LENGTH = 160;
 const SUPPORTED_BACKUP_VERSIONS = new Set([1, BACKUP_VERSION]);
 const ALLOWED_RETENTION = new Set(['30', '90', '365', 'forever']);
 const ALLOWED_SORTS = new Set(['recent', 'priceAsc', 'priceDesc', 'discountDesc']);
@@ -62,6 +64,15 @@ function optionalBoolean(value, fieldName, defaultValue = false) {
   return value;
 }
 
+function optionalAuthors(value) {
+  if (value == null) return [];
+  if (!Array.isArray(value) || value.length > MAX_PRODUCT_AUTHORS) {
+    throw new Error('Invalid product authors.');
+  }
+  const authors = value.map((entry) => requireString(entry, 'product author', MAX_AUTHOR_LENGTH));
+  return [...new Set(authors)];
+}
+
 function sanitizeItem(rawItem) {
   if (!isPlainObject(rawItem)) throw new Error('Invalid tracked product.');
   const id = typeof rawItem.id === 'string' ? rawItem.id.toUpperCase() : '';
@@ -90,6 +101,8 @@ function sanitizeItem(rawItem) {
     trackedIndividually: optionalBoolean(rawItem.trackedIndividually, 'individual tracking state'),
     isPriority: optionalBoolean(rawItem.isPriority, 'priority state')
   };
+  const authors = optionalAuthors(rawItem.authors);
+  if (authors.length > 0) item.authors = authors;
   if (item.wishlistIds.length > 20) throw new Error(`Too many wishlist owners for ${id}.`);
 
   const numericFields = {

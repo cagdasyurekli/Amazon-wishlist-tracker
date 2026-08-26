@@ -16,6 +16,7 @@ describe('content-script tracking boundary', () => {
     document.body.innerHTML = `
       <div id="buybox"></div>
       <h1 id="productTitle">A legitimate product</h1>
+      <div id="bylineInfo"><span class="author"><a class="contributorNameID">Virginia Evans</a></span></div>
       <span class="a-price"><span class="a-offscreen">$19.99</span></span>
     `;
 
@@ -85,6 +86,7 @@ describe('content-script tracking boundary', () => {
         type: 'ADD_TRACKED_ITEM',
         item: expect.objectContaining({
           id: 'B000000001',
+          authors: ['Virginia Evans'],
           url: 'https://www.amazon.com/dp/B000000001'
         })
       }),
@@ -124,5 +126,27 @@ describe('content-script tracking boundary', () => {
     contentMessageListener({ type: 'EXTRACT_VISIBLE_WISHLIST' }, { id: 'test-extension' }, (value) => { response = value; });
 
     expect(response.items.map((item) => item.inStock)).toEqual([true, false]);
+  });
+
+  it('normalizes a visible Turkish wishlist price and availability', () => {
+    document.body.innerHTML = `
+      <div id="buybox"></div>
+      <div id="g-items">
+        <li data-itemid="turkish-item">
+          <a href="/dp/B000000001">Türkiye Wishlist Product</a>
+          <span class="a-price">109,00 TL</span>
+          <p>Şu anda mevcut değil.</p>
+        </li>
+      </div>`;
+    require('../content/content.js');
+
+    let response;
+    contentMessageListener({ type: 'EXTRACT_VISIBLE_WISHLIST' }, { id: 'test-extension' }, (value) => { response = value; });
+
+    expect(response.items[0]).toMatchObject({
+      currentPrice: 109,
+      currency: '₺',
+      inStock: false
+    });
   });
 });

@@ -262,6 +262,7 @@ describe('Chrome extension E2E', () => {
         }, {
           id: 'B000000001',
           title: 'Cobalt Red: How the Blood of the Congo Powers Our Lives',
+          authors: ['Siddharth Kara'],
           url: 'https://www.amazon.nl/dp/B000000001',
           currentPrice: 10.97,
           originalPrice: 10.97,
@@ -294,7 +295,7 @@ describe('Chrome extension E2E', () => {
     await expect(page.$$eval('.item-card[data-id="B012345678"] .chart-sample', (rows) => rows.map(row => row.textContent))).resolves.toHaveLength(2);
     await expect(page.$eval('.item-card[data-id="B012345678"] .chart-samples', (node) => node.textContent)).resolves.toContain('€10.99');
 
-    await page.type('#item-search-input', 'cobalt');
+    await page.type('#item-search-input', 'siddharth');
     await page.waitForFunction(() => document.querySelector('#main-title')?.textContent?.trim() === 'Tracked Items (1 of 3)');
     await expect(page.$$eval('.item-card', (cards) => cards.map(card => card.textContent))).resolves.toHaveLength(1);
     await expect(page.$eval('.item-card .item-title', (node) => node.textContent)).resolves.toContain('Cobalt Red');
@@ -688,9 +689,7 @@ describe('Chrome extension E2E', () => {
     // restore can finish between the key event and the next Puppeteer round trip.
     await page.waitForFunction(async () => {
       const status = document.querySelector('#settings-status');
-      const { trackedItems } = await chrome.storage.local.get('trackedItems');
-      return trackedItems?.[0]?.id === 'BRESTORE01' ||
-        status?.textContent.includes('Backup restored') ||
+      return status?.textContent.includes('Backup restored') ||
         status?.classList.contains('error');
     }, { timeout: 10000 });
     const restoreStatus = await page.$eval('#settings-status', (node) => node.textContent);

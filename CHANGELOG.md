@@ -4,6 +4,24 @@ All notable changes to this project are documented here. Versions follow semanti
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-08-26
+
+### Added
+
+- Amazon Turkey (`amazon.com.tr`) product-page, popup, background-fetch, and public/shared wishlist support.
+- Turkish availability classification and Turkish lira price normalization across visible-page and offscreen parsing.
+- Reproducible 16px and 32px browser-icon generation from size-specific SVG sources.
+- Dashboard search by bounded author names extracted from Amazon product bylines, including multiple contributors.
+
+### Changed
+
+- Wishlist identity validation accepts bounded `=` characters observed in Amazon Turkey list IDs while retaining the existing HTTPS, host, path, redirect, and length restrictions.
+
+### Security
+
+- Amazon Turkey wishlist pages without a strong document-level list identity remain non-destructive: visible products can be imported or updated, but missing-item reconciliation stays fail-closed.
+- Chrome Web Store publication remains outside this source release; no Amazon credentials, session cookies, backend, analytics, or remote scripts were added.
+
 ## [1.3.0] - 2026-08-26
 
 ### Added

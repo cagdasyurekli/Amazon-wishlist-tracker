@@ -147,6 +147,20 @@ describe('locale-aware price formatting', () => {
     assert.equal(api.formatPrice(1299.5, '€', 'de-DE'), expected);
     assert.equal(api.formatPrice(Number.NaN, '€', 'de-DE'), 'N/A');
   });
+
+  it('formats normalized Turkish lira metadata as TRY', async () => {
+    const { api } = await loadStorage();
+    const expected = new Intl.NumberFormat('tr-TR', {
+      style: 'currency',
+      currency: 'TRY',
+      currencyDisplay: 'narrowSymbol',
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    }).format(1299);
+
+    assert.equal(api.formatPrice(1299, '₺', 'tr-TR'), expected);
+    assert.equal(api.formatPrice(1299, 'TL', 'tr-TR'), expected);
+  });
 });
 
 describe('validated backup replacement', () => {

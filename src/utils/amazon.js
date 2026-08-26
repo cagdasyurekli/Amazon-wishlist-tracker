@@ -1,5 +1,6 @@
 const AMAZON_REGISTRABLE_DOMAINS = Object.freeze([
   'amazon.com',
+  'amazon.com.tr',
   'amazon.nl',
   'amazon.de',
   'amazon.fr',
@@ -19,8 +20,8 @@ const AMAZON_IMAGE_HOSTS = new Set([
   'images-jp.amazon.com'
 ]);
 
-const WISHLIST_PATH_PATTERN = /\/(?:hz\/)?wishlist\/ls\/([a-z0-9_-]{1,64})(?:[/?#]|$)/i;
-const WISHLIST_ID_PATTERN = /^[a-z0-9_-]{1,64}$/i;
+const WISHLIST_PATH_PATTERN = /\/(?:hz\/)?wishlist\/ls\/([a-z0-9_=-]{1,64})(?:[/?#]|$)/i;
+const WISHLIST_ID_PATTERN = /^[a-z0-9_=-]{1,64}$/i;
 const PRODUCT_PATH_PATTERN = /\/(?:dp|gp\/product)\/([a-z0-9]{10})(?:[/?#]|$)/i;
 const MAX_URL_LENGTH = 2048;
 
