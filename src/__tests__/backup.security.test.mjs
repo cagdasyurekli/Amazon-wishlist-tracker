@@ -17,6 +17,7 @@ function validItem(overrides = {}) {
   return {
     id: 'B000000001',
     title: 'A tracked product',
+    authors: ['Virginia Evans', 'Jenny Dooley'],
     url: 'https://www.amazon.com/dp/B000000001?ref_=backup',
     imageUrl: 'https://m.media-amazon.com/images/I/product.jpg#ignored',
     currentPrice: 12.5,
@@ -58,6 +59,7 @@ describe('backup validation boundary', () => {
 
     assert.equal(validated.items[0].url, 'https://www.amazon.com/dp/B000000001');
     assert.equal(validated.items[0].imageUrl, 'https://m.media-amazon.com/images/I/product.jpg');
+    assert.deepEqual(validated.items[0].authors, ['Virginia Evans', 'Jenny Dooley']);
     assert.equal(validated.trackedWishlists[0].url, 'https://www.amazon.com/hz/wishlist/ls/LIST-A');
     assert.deepEqual(validated.settings, {
       defaultDiscount: 20,
@@ -95,6 +97,22 @@ describe('backup validation boundary', () => {
       () => backup.validateBackupPayload(validPayload({ version: 3 })),
       /Unsupported backup version/
     );
+  });
+
+  it('round-trips bounded wishlist IDs containing Amazon padding characters', () => {
+    const wishlistId = 'LIST=1-ABC';
+    const validated = backup.validateBackupPayload(validPayload({
+      items: [validItem({ wishlistIds: [wishlistId] })],
+      trackedWishlists: [{
+        id: wishlistId,
+        url: `https://www.amazon.com.tr/hz/wishlist/ls/${wishlistId}`,
+        autoSync: true
+      }]
+    }));
+
+    assert.deepEqual(validated.items[0].wishlistIds, [wishlistId]);
+    assert.equal(validated.trackedWishlists[0].id, wishlistId);
+    assert.equal(validated.trackedWishlists[0].url, `https://www.amazon.com.tr/hz/wishlist/ls/${wishlistId}`);
   });
 
   it('infers a legacy wishlist region only from consistently associated products', () => {

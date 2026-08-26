@@ -91,7 +91,9 @@ export function formatPrice(price, currency, locale) {
     '$': 'USD',
     '€': 'EUR',
     '£': 'GBP',
-    '¥': 'JPY'
+    '¥': 'JPY',
+    '₺': 'TRY',
+    'TL': 'TRY'
   };
   const currencyCode = currencyCodes[currency] || (/^[A-Z]{3}$/.test(currency || '') ? currency : null);
   try {

@@ -8,6 +8,8 @@ const ASIN_PATTERN = /^[A-Z0-9]{10}$/;
 const PRODUCT_PATH_PATTERN = /\/(?:dp|gp\/product)\/([A-Z0-9]{10})(?:[/?]|$)/i;
 const MAX_VISIBLE_WISHLIST_ROWS = 2000;
 const MAX_WISHLIST_TITLE_LENGTH = 300;
+const MAX_PRODUCT_AUTHORS = 20;
+const MAX_AUTHOR_LENGTH = 160;
 let trackButton = null;
 
 const TRACK_BUTTON_STYLES = `
@@ -53,6 +55,13 @@ function extractAsinFromUrl(rawUrl) {
   } catch {
     return null;
   }
+}
+
+function extractAuthorNames(root, selector) {
+  return [...new Set(Array.from(root.querySelectorAll(selector))
+    .map((node) => (node.textContent || '').replace(/\s+/g, ' ').trim())
+    .filter((name) => name && name.length <= MAX_AUTHOR_LENGTH))]
+    .slice(0, MAX_PRODUCT_AUTHORS);
 }
 
 // Inject a "Track Price" button near the Amazon Buy Box. The closed shadow
@@ -121,6 +130,10 @@ function extractAndTrackProduct() {
   // Try to find product title
   const titleEl = document.querySelector('#productTitle');
   const title = titleEl ? titleEl.textContent.trim() : document.title;
+  const authors = extractAuthorNames(
+    document,
+    '#bylineInfo .contributorNameID, #bylineInfo .author a'
+  );
 
   // Product identity is security-sensitive: never invent an ID when the page
   // URL does not contain a canonical ten-character ASIN.
@@ -153,6 +166,7 @@ function extractAndTrackProduct() {
   const item = {
     id: asin,
     title: title,
+    authors,
     url: window.location.href.split('?')[0], // canonical URL
     currentPrice: currentPrice,
     currency,
@@ -191,8 +205,9 @@ function parsePrice(rawText) {
 
 function extractCurrency(rawText) {
   if (!rawText) return null;
-  const match = rawText.match(/[$€£¥]/);
-  return match ? match[0] : null;
+  const symbol = rawText.match(/[$€£¥₺]/)?.[0];
+  if (symbol) return symbol;
+  return /(?:^|[\d.,\s])TL(?:[\d.,\s]|$)/i.test(rawText) ? '₺' : null;
 }
 
 function parseWishlistPriceDrop(text, currentPrice) {
@@ -232,6 +247,10 @@ function extractWishlistItemsFromPage() {
     const titleEl = row.querySelector('[id^="itemName_"], h2 a, a[href*="/dp/"]');
     const title = (titleEl?.textContent || '').replace(/\s+/g, ' ').trim().slice(0, MAX_WISHLIST_TITLE_LENGTH);
     if (!title) return;
+    const authors = extractAuthorNames(
+      row,
+      '[id^="item-byline"] a, [class*="item-byline"] a'
+    );
 
     let currentPrice = null;
     let currency = null;
@@ -251,7 +270,7 @@ function extractWishlistItemsFromPage() {
       }
     }
     if (currentPrice === null) {
-      const priceMatch = text.match(/[€$£¥]\s*\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{2})?/);
+      const priceMatch = text.match(/(?:[€$£¥₺]\s*\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{2})?|\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{2})?\s*(?:TL|₺))/i);
       if (priceMatch) {
         currentPrice = parsePrice(priceMatch[0]);
         currency = extractCurrency(priceMatch[0]);
@@ -286,6 +305,7 @@ function extractWishlistItemsFromPage() {
       id: asin,
       wishlistItemId: (row.getAttribute('data-itemid') || '').slice(0, 128) || null,
       title,
+      authors,
       url: `${pageOrigin}/dp/${asin}`,
       imageUrl: row.querySelector('img[src*="images/I/"]')?.src || '',
       currentPrice,

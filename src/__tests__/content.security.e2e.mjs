@@ -27,7 +27,7 @@ afterEach(async () => {
 });
 
 describe('real Chrome content-script user-intent boundary', () => {
-  it('rejects page-script activation and accepts one genuine click on a valid product', { timeout: 45000 }, async () => {
+  it('rejects page-script activation and accepts one genuine click on an amazon.com.tr product', { timeout: 45000 }, async () => {
     browser = await within(puppeteer.launch({
       headless: 'new',
       args: [
@@ -51,7 +51,7 @@ describe('real Chrome content-script user-intent boundary', () => {
           contentType: 'text/html',
           body: `<!doctype html><html><head><title>Test product</title></head><body>
             <h1 id="productTitle">Test product</h1>
-            <div class="a-price"><span class="a-offscreen">$19.99</span></div>
+            <div class="a-price"><span class="a-offscreen">109,00 TL</span></div>
             <div id="buybox"></div>
           </body></html>`
         });
@@ -59,7 +59,7 @@ describe('real Chrome content-script user-intent boundary', () => {
         request.abort();
       }
     });
-    await within(productPage.goto('https://www.amazon.com/dp/B000000001', { waitUntil: 'domcontentloaded' }), 'load product page');
+    await within(productPage.goto('https://www.amazon.com.tr/dp/B000000001', { waitUntil: 'domcontentloaded' }), 'load product page');
     await within(productPage.waitForSelector('#amz-tracker-control'), 'find closed-shadow control');
 
     const exposedState = await productPage.$eval('#amz-tracker-control', (host) => ({
@@ -100,6 +100,8 @@ describe('real Chrome content-script user-intent boundary', () => {
       return trackedItems[0];
     });
     assert.equal(stored.id, 'B000000001');
-    assert.equal(stored.url, 'https://www.amazon.com/dp/B000000001');
+    assert.equal(stored.url, 'https://www.amazon.com.tr/dp/B000000001');
+    assert.equal(stored.currentPrice, 109);
+    assert.equal(stored.currency, '₺');
   });
 });

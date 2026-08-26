@@ -92,14 +92,17 @@ describe('canonical Amazon URL and image policy', () => {
   });
 
   it('accepts supported HTTPS URLs and rejects scheme, authority, port and lookalike variants', () => {
-    for (const domain of ['amazon.com', 'amazon.nl', 'amazon.de', 'amazon.fr', 'amazon.es', 'amazon.it', 'amazon.co.uk']) {
+    for (const domain of ['amazon.com', 'amazon.com.tr', 'amazon.nl', 'amazon.de', 'amazon.fr', 'amazon.es', 'amazon.it', 'amazon.co.uk']) {
       assert.ok(amazon.parseCanonicalAmazonUrl(`https://www.${domain}/dp/B000000001`));
       assert.ok(amazon.parseCanonicalAmazonProductUrl(`https://www.${domain}/gp/product/B000000001?ref_=test`));
-      assert.ok(amazon.parseCanonicalAmazonWishlistUrl(`https://www.${domain}/hz/wishlist/ls/LIST_1-ABC?viewType=list`));
+      const wishlistUrl = `https://www.${domain}/hz/wishlist/ls/LIST=1-ABC?viewType=list`;
+      assert.ok(amazon.parseCanonicalAmazonWishlistUrl(wishlistUrl));
+      assert.equal(amazon.getAmazonWishlistId(wishlistUrl), 'LIST=1-ABC');
     }
     for (const value of [
       'http://www.amazon.com/dp/B000000001',
       'https://amazon.com.evil.test/dp/B000000001',
+      'https://amazon.com.tr.evil.test/dp/B000000001',
       'https://user:pass@amazon.com/dp/B000000001',
       'https://amazon.com:444/dp/B000000001',
       'javascript://amazon.com/dp/B000000001',
@@ -117,6 +120,8 @@ describe('canonical Amazon URL and image policy', () => {
     assert.ok(patterns.length > 0);
     assert.ok(patterns.every((pattern) => pattern.startsWith('https://*.amazon.')));
     assert.equal(patterns.some((pattern) => pattern.startsWith('*://') || pattern.startsWith('http://')), false);
+    assert.ok(manifest.host_permissions.includes('https://*.amazon.com.tr/*'));
+    assert.ok(manifest.content_scripts.some((entry) => entry.matches?.includes('https://*.amazon.com.tr/*')));
   });
 
   it('upgrades only identity-matched legacy HTTP product links before navigation', () => {
@@ -230,10 +235,10 @@ describe('inert parser controls and typed wishlist completeness', () => {
   });
 
   it('parses realistic regional Amazon wishlist rows with lazy CDN images', () => {
-    for (const domain of ['amazon.com', 'amazon.nl', 'amazon.de', 'amazon.fr', 'amazon.es', 'amazon.it', 'amazon.co.uk']) {
+    for (const domain of ['amazon.com', 'amazon.com.tr', 'amazon.nl', 'amazon.de', 'amazon.fr', 'amazon.es', 'amazon.it', 'amazon.co.uk']) {
       const data = offscreen.parseAmazonWishlist(`
         <html><body>
-          <input name="listId" value="LIST1">
+          <input name="listId" value="LIST=1">
           <div id="g-items">
             <li data-itemid="ITEM1">
               <a id="itemName_B000000001" href="/dp/B000000001">Regional Product</a>
@@ -242,7 +247,7 @@ describe('inert parser controls and typed wishlist completeness', () => {
             </li>
           </div>
         </body></html>
-      `, `https://www.${domain}/hz/wishlist/ls/LIST1`);
+      `, `https://www.${domain}/hz/wishlist/ls/LIST=1`);
       assert.equal(data.completeness, 'validated');
       assert.equal(data.items.length, 1);
       assert.equal(data.items[0].url, `https://www.${domain}/dp/B000000001`);

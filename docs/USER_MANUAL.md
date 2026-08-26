@@ -13,6 +13,7 @@ sign in to an Amazon account.
 Supported marketplaces:
 
 - `amazon.com`
+- `amazon.com.tr`
 - `amazon.co.uk`
 - `amazon.de`
 - `amazon.fr`
@@ -141,8 +142,8 @@ popup.
 
 ### Find and organize products
 
-- **Search** matches product title, ASIN (Amazon Standard Identification Number), status, target information, and other visible
-  item metadata.
+- **Search** matches product title, author name, ASIN (Amazon Standard Identification Number), status, target information, and other
+  item metadata. Newly tracked product pages capture Amazon's visible author byline; older items gain it after a successful product refresh.
 - **Sort** supports Recently Added, Price: Low to High, Price: High to Low, and
   Discount %. The selection is remembered as a lightweight Chrome preference.
 - **Filter** supports All items, Price drops, Priority, Out of stock, Target reached,

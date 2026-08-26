@@ -35,7 +35,13 @@
     // Italian
     'attualmente non disponibile',
     'non disponibile',
-    'esaurito'
+    'esaurito',
+    // Turkish
+    'şu anda mevcut değil',
+    'mevcut değil',
+    'geçici olarak stokta yok',
+    'stokta yok',
+    'stokta değil'
   ]);
 
   const POSITIVE_PHRASES = Object.freeze([
@@ -55,7 +61,11 @@
     'disponible',
     // Italian
     'disponibile',
-    'disponibilità immediata'
+    'disponibilità immediata',
+    // Turkish
+    'stokta var',
+    'stokta sadece',
+    'kargoya verilir'
   ]);
 
   function normalizeAvailabilityText(value) {

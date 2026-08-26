@@ -132,6 +132,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const searchable = [
       item.id,
       item.title,
+      ...(Array.isArray(item.authors) ? item.authors : []),
       item.inStock ? 'in stock' : 'out of stock',
       item.targetPrice ? 'target set' : 'no target set',
       item.isPriority ? 'priority' : '',
@@ -885,7 +886,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     if (items.length === 0) {
-      setEmptyState('No matching products found.', 'Try a different title, ASIN, status, or target search.');
+      setEmptyState('No matching products found.', 'Try a different title, author, ASIN, status, or target search.');
       emptyState.style.display = 'block';
       itemList.appendChild(emptyState);
       return;

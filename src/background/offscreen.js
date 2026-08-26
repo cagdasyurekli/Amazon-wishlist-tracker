@@ -8,6 +8,8 @@ chrome.runtime.onMessage.addListener(handleMessages);
 
 const MAX_HTML_CHARS = 8 * 1024 * 1024;
 const MAX_WISHLIST_ROWS = 2500;
+const MAX_PRODUCT_AUTHORS = 20;
+const MAX_AUTHOR_LENGTH = 160;
 const SAFE_IMAGE_HOSTS = new Set([
   'm.media-amazon.com',
   'images.amazon.com',
@@ -18,7 +20,7 @@ const SAFE_IMAGE_HOSTS = new Set([
   'images-cn.ssl-images-amazon.com',
   'images-jp.amazon.com'
 ]);
-const AMAZON_HOST_PATTERN = /(^|\.)amazon\.(com|nl|de|fr|es|it|co\.uk)$/i;
+const AMAZON_HOST_PATTERN = /(^|\.)amazon\.(com(?:\.tr)?|nl|de|fr|es|it|co\.uk)$/i;
 
 function getAmazonWishlistId(value) {
   try {
@@ -26,7 +28,7 @@ function getAmazonWishlistId(value) {
     if (parsed.protocol !== 'https:' || parsed.username || parsed.password || parsed.port || !AMAZON_HOST_PATTERN.test(parsed.hostname)) {
       return null;
     }
-    return parsed.pathname.match(/\/(?:hz\/)?wishlist\/ls\/([a-z0-9_-]{1,64})(?:[/?#]|$)/i)?.[1] || null;
+    return parsed.pathname.match(/\/(?:hz\/)?wishlist\/ls\/([a-z0-9_=-]{1,64})(?:[/?#]|$)/i)?.[1] || null;
   } catch (_error) {
     return null;
   }
@@ -59,6 +61,13 @@ function sanitizeAmazonImageUrl(value, baseUrl) {
   } catch (_error) {
     return '';
   }
+}
+
+function extractAuthorNames(root, selector) {
+  return [...new Set(Array.from(root.querySelectorAll(selector))
+    .map((node) => (node.textContent || '').replace(/\s+/g, ' ').trim())
+    .filter((name) => name && name.length <= MAX_AUTHOR_LENGTH))]
+    .slice(0, MAX_PRODUCT_AUTHORS);
 }
 
 function parseInertHtml(htmlString, baseUrl) {
@@ -207,8 +216,9 @@ function parseSplitPrice(container) {
 
 function extractCurrency(rawText) {
   if (!rawText) return null;
-  const match = rawText.match(/[$€£¥]/);
-  return match ? match[0] : null;
+  const symbol = rawText.match(/[$€£¥₺]/)?.[0];
+  if (symbol) return symbol;
+  return /(?:^|[\d.,\s])TL(?:[\d.,\s]|$)/i.test(rawText) ? '₺' : null;
 }
 
 function parseWishlistPriceDrop(text, currentPrice) {
@@ -244,6 +254,7 @@ function parseAmazonHtml(htmlString, url) {
     success: true,
     price: null,
     title: null,
+    authors: [],
     inStock: false,
     soldByAmazon: false,
     currency: null,
@@ -267,6 +278,10 @@ function parseAmazonHtml(htmlString, url) {
   if (titleEl) {
     data.title = titleEl.textContent.trim();
   }
+  data.authors = extractAuthorNames(
+    doc,
+    '#bylineInfo .contributorNameID, #bylineInfo .author a'
+  );
 
   // Extract Buy Box / Current Price
   // Amazon uses various IDs: #priceblock_ourprice, #priceblock_dealprice, or standard core price elements
@@ -366,6 +381,10 @@ function parseAmazonWishlist(htmlString, url) {
     // Find title
     const titleEl = el.querySelector(`a[id^="itemName_"]`) || linkEl;
     const title = titleEl.title || titleEl.textContent.trim();
+    const authors = extractAuthorNames(
+      el,
+      '[id^="item-byline"] a, [class*="item-byline"] a'
+    );
 
     // Find price
     let currentPrice = null;
@@ -450,6 +469,7 @@ function parseAmazonWishlist(htmlString, url) {
       items.push({
         id: asin,
         title: title || 'Unknown Product',
+        authors,
         url: productUrl,
         imageUrl: imageUrl,
         currentPrice: currentPrice,

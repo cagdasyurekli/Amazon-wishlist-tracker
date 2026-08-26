@@ -15,6 +15,12 @@ describe('Amazon marketplace availability phrases', () => {
     expect(classifyAvailabilityText('Available from these sellers')).toBe(false);
     expect(classifyAvailabilityText('Indisponible')).toBe(false);
     expect(classifyAvailabilityText('Non disponibile')).toBe(false);
+    expect(classifyAvailabilityText('Bu ürün stokta değil.')).toBe(false);
+  });
+
+  it('recognizes Turkish low-stock and orderable dispatch wording', () => {
+    expect(classifyAvailabilityText('Stokta sadece 4 adet kaldı.')).toBe(true);
+    expect(classifyAvailabilityText('Genellikle 2–3 gün içinde kargoya verilir.')).toBe(true);
   });
 
   it('returns unknown for unrelated availability copy', () => {

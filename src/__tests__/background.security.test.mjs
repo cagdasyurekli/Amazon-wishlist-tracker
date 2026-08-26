@@ -86,14 +86,14 @@ async function loadBackground(initialItems = [], options = {}) {
       const parseWishlist = (value) => {
         try {
           const parsed = new URL(value);
-          return parsed.protocol === 'https:' && /(^|\.)amazon\.(com|nl|de|fr|es|it|co\.uk)$/i.test(parsed.hostname) &&
-            /\/(?:hz\/)?wishlist\/ls\/[a-z0-9_-]{1,64}(?:[/?#]|$)/i.test(parsed.pathname)
+          return parsed.protocol === 'https:' && /(^|\.)amazon\.(com(?:\.tr)?|nl|de|fr|es|it|co\.uk)$/i.test(parsed.hostname) &&
+            /\/(?:hz\/)?wishlist\/ls\/[a-z0-9_=-]{1,64}(?:[/?#]|$)/i.test(parsed.pathname)
             ? parsed
             : null;
         } catch { return null; }
       };
       this.setExport('getAmazonWishlistId', (value) =>
-        parseWishlist(value)?.pathname.match(/\/(?:hz\/)?wishlist\/ls\/([a-z0-9_-]{1,64})(?:[/?#]|$)/i)?.[1] || null
+        parseWishlist(value)?.pathname.match(/\/(?:hz\/)?wishlist\/ls\/([a-z0-9_=-]{1,64})(?:[/?#]|$)/i)?.[1] || null
       );
       this.setExport('migrateLegacyWishlistRecords', (wishlists) => wishlists.map((entry) =>
         typeof entry === 'string'
@@ -105,7 +105,7 @@ async function loadBackground(initialItems = [], options = {}) {
           const parsed = new URL(value);
           const asin = parsed.pathname.match(/\/(?:dp|gp\/product)\/([A-Z0-9]{10})(?:[/?]|$)/i)?.[1]?.toUpperCase();
           if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password || parsed.port ||
-              !/(^|\.)amazon\.(com|nl|de|fr|es|it|co\.uk)$/i.test(parsed.hostname) || asin !== expectedAsin) return null;
+              !/(^|\.)amazon\.(com(?:\.tr)?|nl|de|fr|es|it|co\.uk)$/i.test(parsed.hostname) || asin !== expectedAsin) return null;
           return `https://${parsed.hostname.toLowerCase()}/dp/${asin}`;
         } catch { return null; }
       });
@@ -526,7 +526,8 @@ describe('ADD_TRACKED_ITEM privilege boundary', () => {
 
     assert.equal(response.success, true);
     assert.equal(harness.savedItems.length, 1);
-    assert.deepEqual(harness.savedItems[0], {
+    const { authors, ...savedItem } = harness.savedItems[0];
+    assert.deepEqual(savedItem, {
       id: 'B000000001',
       title: 'A legitimate product',
       url: 'https://www.amazon.com/dp/B000000001',
@@ -538,8 +539,30 @@ describe('ADD_TRACKED_ITEM privilege boundary', () => {
       trackingStartedAt: harness.savedItems[0].trackingStartedAt,
       trackingBaselineExact: true
     });
+    assert.deepEqual(Array.from(authors), []);
     assert.ok(harness.savedItems[0].trackingStartedAt >= beforeTracking);
     assert.ok(harness.savedItems[0].trackingStartedAt <= afterTracking);
+  });
+
+  it('accepts a matching amazon.com.tr product and preserves TRY metadata', async () => {
+    const harness = await loadBackground();
+    const url = 'https://www.amazon.com.tr/dp/B000000001';
+
+    const response = await harness.sendMessage({
+      type: 'ADD_TRACKED_ITEM',
+      item: item('B000000001', {
+        url,
+        currentPrice: 109,
+        originalPrice: 109,
+        currency: '₺',
+        authors: ['Ayşe Yılmaz', 'Mehmet Demir']
+      })
+    }, sender('B000000001', { tab: { id: 17, url } }));
+
+    assert.equal(response.success, true);
+    assert.equal(harness.savedItems[0].url, url);
+    assert.equal(harness.savedItems[0].currency, '₺');
+    assert.deepEqual(Array.from(harness.savedItems[0].authors), ['Ayşe Yılmaz', 'Mehmet Demir']);
   });
 
   it('preserves the existing-record flow and marks it individually tracked', async () => {
@@ -570,7 +593,9 @@ describe('ADD_TRACKED_ITEM privilege boundary', () => {
       [{ type: 'ADD_TRACKED_ITEM', item: item('B000000001', { url: 'https://www.amazon.com:444/dp/B000000001' }) }, sender()],
       [{ type: 'ADD_TRACKED_ITEM', item: item('ID-123') }, sender('ID-123')],
       [{ type: 'ADD_TRACKED_ITEM', item: item('B000000002') }, sender('B000000001')],
-      [{ type: 'ADD_TRACKED_ITEM', item: item('B000000003', { title: 'x'.repeat(301) }) }, sender('B000000003')]
+      [{ type: 'ADD_TRACKED_ITEM', item: item('B000000003', { title: 'x'.repeat(301) }) }, sender('B000000003')],
+      [{ type: 'ADD_TRACKED_ITEM', item: item('B000000004', { authors: ['x'.repeat(161)] }) }, sender('B000000004')],
+      [{ type: 'ADD_TRACKED_ITEM', item: item('B000000005', { authors: 'Not an array' }) }, sender('B000000005')]
     ];
 
     for (const [message, source] of attempts) {
@@ -816,7 +841,7 @@ describe('price history clear coordination', () => {
 
 describe('scraped purchase text handling', () => {
   it('does not delete history, notify, or remove a tracked record when isPurchased is untrusted', async () => {
-    const original = item('B000000001', { currentPrice: 20 });
+    const original = item('B000000001', { currentPrice: 20, authors: ['Known Author'] });
     const harness = await loadBackground([original]);
     const history = { B000000001: [{ price: 20, timestamp: 1 }] };
     const scraped = { ...original };
@@ -825,6 +850,7 @@ describe('scraped purchase text handling', () => {
       success: true,
       isPurchased: true,
       price: 19,
+      authors: [],
       currency: '$',
       inStock: true,
       buyBoxPrice: 19,
@@ -833,6 +859,7 @@ describe('scraped purchase text handling', () => {
 
     assert.equal(history.B000000001.length, 2);
     assert.equal(scraped.isPurchased, undefined);
+    assert.deepEqual(scraped.authors, ['Known Author']);
     assert.equal(harness.notifications.length, 0);
 
     await harness.api.persistScrapeResults(

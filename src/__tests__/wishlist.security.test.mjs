@@ -77,14 +77,14 @@ async function loadHarness({ storedState = {}, cursor = 0, scrapeResult, tracked
       const parseWishlist = (value) => {
         try {
           const parsed = new URL(value);
-          return parsed.protocol === 'https:' && /(^|\.)amazon\.(com|nl|de|fr|es|it|co\.uk)$/i.test(parsed.hostname) &&
-            /\/(?:hz\/)?wishlist\/ls\/[a-z0-9_-]{1,64}(?:[/?#]|$)/i.test(parsed.pathname)
+          return parsed.protocol === 'https:' && /(^|\.)amazon\.(com(?:\.tr)?|nl|de|fr|es|it|co\.uk)$/i.test(parsed.hostname) &&
+            /\/(?:hz\/)?wishlist\/ls\/[a-z0-9_=-]{1,64}(?:[/?#]|$)/i.test(parsed.pathname)
             ? parsed
             : null;
         } catch { return null; }
       };
       this.setExport('getAmazonWishlistId', (value) =>
-        parseWishlist(value)?.pathname.match(/\/(?:hz\/)?wishlist\/ls\/([a-z0-9_-]{1,64})(?:[/?#]|$)/i)?.[1] || null
+        parseWishlist(value)?.pathname.match(/\/(?:hz\/)?wishlist\/ls\/([a-z0-9_=-]{1,64})(?:[/?#]|$)/i)?.[1] || null
       );
       this.setExport('migrateLegacyWishlistRecords', (wishlists) => wishlists.map((entry) => ({ ...entry })));
       this.setExport('normalizeStoredAmazonProductUrl', () => null);
