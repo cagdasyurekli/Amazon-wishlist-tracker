@@ -4,6 +4,13 @@ All notable changes to this project are documented here. Versions follow semanti
 
 ## [Unreleased]
 
+## [1.4.3] - 2026-08-28
+
+### Fixed
+
+- Manual import and sync once again use the complete bounded background paginator before considering visible-tab rows, preventing Amazon.nl's initially rendered 10 products from truncating wishlists with hundreds of items.
+- Identity-bound visible rows remain available only as an explicitly partial fallback when the complete background read fails or is paused.
+
 ## [1.4.2] - 2026-08-28
 
 ### Fixed

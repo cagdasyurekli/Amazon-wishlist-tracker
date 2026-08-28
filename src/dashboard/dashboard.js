@@ -1,4 +1,5 @@
 import { getTrackedItems, getStorageData, formatPrice, StorageKeys, StorageArea } from '../utils/storage.js';
+import { extractWishlistWithVisibleFallback } from './wishlist_extraction.js';
 import {
   getAmazonAsin,
   getAmazonWishlistId,
@@ -495,17 +496,18 @@ document.addEventListener('DOMContentLoaded', async () => {
     const historyGeneration = Number(
       await getStorageData(StorageKeys.PRICE_HISTORY_GENERATION, StorageArea.LOCAL)
     ) || 0;
-    const visibleResponse = await extractVisibleWishlistFromOpenTab(url);
-    if (visibleResponse) return { ...visibleResponse, historyGeneration };
-
-    return new Promise((resolve) => {
-      chrome.runtime.sendMessage({ type: 'EXTRACT_WISHLIST', url }, (response) => {
-        if (chrome.runtime.lastError) {
-          resolve({ error: chrome.runtime.lastError.message });
-          return;
-        }
-        resolve(response);
-      });
+    return extractWishlistWithVisibleFallback({
+      historyGeneration,
+      readBackground: () => new Promise((resolve) => {
+        chrome.runtime.sendMessage({ type: 'EXTRACT_WISHLIST', url }, (response) => {
+          if (chrome.runtime.lastError) {
+            resolve({ error: chrome.runtime.lastError.message });
+            return;
+          }
+          resolve(response);
+        });
+      }),
+      readVisible: () => extractVisibleWishlistFromOpenTab(url)
     });
   }
 
