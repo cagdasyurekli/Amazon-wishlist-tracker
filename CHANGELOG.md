@@ -4,9 +4,12 @@ All notable changes to this project are documented here. Versions follow semanti
 
 ## [Unreleased]
 
+## [1.4.4] - 2026-08-28
+
 ### Fixed
 
 - Amazon.nl background wishlist pagination now accepts only same-origin, identity-bound `wishlist/slv/items` continuation URLs and recognizes Amazon's empty-token terminal sentinel, allowing large public lists to finish instead of falling back after the first 10 products.
+- The release suite now drives Amazon.nl continuation HTML through the production scraper and offscreen parser together, covering the cross-layer pagination contract missed by the v1.4.3 mocks.
 
 ## [1.4.3] - 2026-08-28
 
