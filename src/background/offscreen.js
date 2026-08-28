@@ -21,6 +21,8 @@ const SAFE_IMAGE_HOSTS = new Set([
   'images-jp.amazon.com'
 ]);
 const AMAZON_HOST_PATTERN = /(^|\.)amazon\.(com(?:\.tr)?|nl|de|fr|es|it|co\.uk)$/i;
+const WISHLIST_ID_PATTERN = /^[a-z0-9_=-]{1,64}$/i;
+const WISHLIST_CONTINUATION_PATH_PATTERN = /^\/(?:-\/[a-z]{2}(?:-[a-z]{2})?\/)?hz\/wishlist\/slv\/items\/?$/i;
 
 function getAmazonWishlistId(value) {
   try {
@@ -28,7 +30,18 @@ function getAmazonWishlistId(value) {
     if (parsed.protocol !== 'https:' || parsed.username || parsed.password || parsed.port || !AMAZON_HOST_PATTERN.test(parsed.hostname)) {
       return null;
     }
-    return parsed.pathname.match(/\/(?:hz\/)?wishlist\/ls\/([a-z0-9_=-]{1,64})(?:[/?#]|$)/i)?.[1] || null;
+    const pathId = parsed.pathname.match(/\/(?:hz\/)?wishlist\/ls\/([a-z0-9_=-]{1,64})(?:[/?#]|$)/i)?.[1];
+    if (pathId) return pathId;
+    if (!WISHLIST_CONTINUATION_PATH_PATTERN.test(parsed.pathname)) return null;
+
+    const listIds = parsed.searchParams.getAll('lid');
+    const paginationTokens = parsed.searchParams.getAll('paginationToken');
+    return listIds.length === 1 &&
+      WISHLIST_ID_PATTERN.test(listIds[0]) &&
+      paginationTokens.length === 1 &&
+      paginationTokens[0]
+      ? listIds[0]
+      : null;
   } catch (_error) {
     return null;
   }
@@ -38,9 +51,48 @@ function resolveAmazonWishlistPageUrl(value, baseUrl) {
   try {
     const parsed = new URL(value, baseUrl);
     const expectedId = getAmazonWishlistId(baseUrl);
-    return expectedId && getAmazonWishlistId(parsed.href) === expectedId ? parsed : null;
+    if (!expectedId || getAmazonWishlistId(parsed.href) !== expectedId) return null;
+    const base = new URL(baseUrl);
+    if (
+      WISHLIST_CONTINUATION_PATH_PATTERN.test(parsed.pathname) &&
+      parsed.origin !== base.origin
+    ) return null;
+    return parsed;
   } catch (_error) {
     return null;
+  }
+}
+
+function isAmazonWishlistTerminalContinuationUrl(value, baseUrl) {
+  try {
+    const parsed = new URL(value, baseUrl);
+    const base = new URL(baseUrl);
+    const expectedId = getAmazonWishlistId(base.href);
+    const listIds = parsed.searchParams.getAll('lid');
+    const paginationTokens = parsed.searchParams.getAll('paginationToken');
+    return Boolean(
+      expectedId &&
+      parsed.origin === base.origin &&
+      WISHLIST_CONTINUATION_PATH_PATTERN.test(parsed.pathname) &&
+      listIds.length === 1 &&
+      listIds[0] === expectedId &&
+      paginationTokens.length === 1 &&
+      paginationTokens[0] === ''
+    );
+  } catch (_error) {
+    return false;
+  }
+}
+
+function isIdentityBoundWishlistContinuationUrl(value) {
+  try {
+    const parsed = new URL(value);
+    return Boolean(
+      getAmazonWishlistId(parsed.href) &&
+      WISHLIST_CONTINUATION_PATH_PATTERN.test(parsed.pathname)
+    );
+  } catch (_error) {
+    return false;
   }
 }
 
@@ -501,9 +553,11 @@ function parseAmazonWishlist(htmlString, url) {
   }
 
   if (nextHref) {
-    const resolved = resolveAmazonWishlistPageUrl(nextHref, url);
-    if (!resolved) throw new Error('INVALID_AMAZON_URL');
-    nextPageUrl = resolved.href;
+    if (!isAmazonWishlistTerminalContinuationUrl(nextHref, url)) {
+      const resolved = resolveAmazonWishlistPageUrl(nextHref, url);
+      if (!resolved) throw new Error('INVALID_AMAZON_URL');
+      nextPageUrl = resolved.href;
+    }
   }
 
   const requestedWishlistId = getAmazonWishlistId(url);
@@ -519,7 +573,8 @@ function parseAmazonWishlist(htmlString, url) {
     throw new Error('WISHLIST_ID_MISMATCH');
   }
 
-  const hasMatchingIdentity = declaredWishlistIds.includes(requestedWishlistId);
+  const hasMatchingIdentity = declaredWishlistIds.includes(requestedWishlistId) ||
+    isIdentityBoundWishlistContinuationUrl(url);
   const hasWishlistContainer = Boolean(doc.querySelector(
     '#g-items, #wishlist-page, #wl-item-view, [data-testid="wishlist-container"]'
   ));
