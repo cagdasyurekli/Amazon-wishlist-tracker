@@ -25,7 +25,8 @@ const offscreen = require('../background/offscreen.js');
 const originals = {
   chrome: globalThis.chrome,
   fetch: globalThis.fetch,
-  consoleError: console.error
+  consoleError: console.error,
+  random: Math.random
 };
 
 function htmlResponse(html, url = 'https://www.amazon.com/dp/B000000001', headers = {}) {
@@ -68,6 +69,7 @@ afterEach(() => {
   globalThis.fetch = originals.fetch;
   globalThis.chrome = originals.chrome;
   console.error = originals.consoleError;
+  Math.random = originals.random;
 });
 
 describe('canonical Amazon URL and image policy', () => {
@@ -114,6 +116,42 @@ describe('canonical Amazon URL and image policy', () => {
     ]) {
       assert.equal(amazon.parseCanonicalAmazonUrl(value), null, value);
     }
+  });
+
+  it('accepts only identity-bound same-origin Amazon wishlist continuation URLs', () => {
+    const baseUrl = 'https://www.amazon.nl/-/en/hz/wishlist/ls/LIST1';
+    const continuationUrl = 'https://www.amazon.nl/-/en/hz/wishlist/slv/items?paginationToken=OPAQUE_TOKEN&lid=LIST1';
+
+    assert.equal(amazon.getAmazonWishlistId(continuationUrl), 'LIST1');
+    assert.equal(amazon.resolveAmazonWishlistPageUrl(continuationUrl, baseUrl)?.href, continuationUrl);
+    assert.equal(amazon.resolveAmazonWishlistPageUrl(
+      'https://www.amazon.nl/-/en/hz/wishlist/slv/items?paginationToken=OPAQUE_TOKEN&lid=OTHER',
+      baseUrl
+    ), null);
+    assert.equal(amazon.resolveAmazonWishlistPageUrl(
+      'https://www.amazon.de/-/en/hz/wishlist/slv/items?paginationToken=OPAQUE_TOKEN&lid=LIST1',
+      baseUrl
+    ), null);
+    assert.equal(amazon.resolveAmazonWishlistPageUrl(
+      'https://www.amazon.nl/-/en/hz/wishlist/slv/items?lid=LIST1',
+      baseUrl
+    ), null);
+    assert.equal(amazon.resolveAmazonWishlistPageUrl(
+      'https://www.amazon.nl/-/en/hz/wishlist/other/items?paginationToken=OPAQUE_TOKEN&lid=LIST1',
+      baseUrl
+    ), null);
+    assert.equal(amazon.resolveAmazonWishlistPageUrl(
+      'https://www.amazon.nl/evil/hz/wishlist/slv/items?paginationToken=OPAQUE_TOKEN&lid=LIST1',
+      baseUrl
+    ), null);
+    assert.equal(amazon.resolveAmazonWishlistPageUrl(
+      'https://www.amazon.nl/-/en/hz/wishlist/slv/items?paginationToken=ONE&paginationToken=TWO&lid=LIST1',
+      baseUrl
+    ), null);
+    assert.equal(amazon.resolveAmazonWishlistPageUrl(
+      'https://www.amazon.nl/-/en/hz/wishlist/slv/items?paginationToken=OPAQUE_TOKEN&lid=LIST1&lid=LIST1',
+      baseUrl
+    ), null);
   });
 
   it('declares HTTPS-only Amazon host and content-script match patterns', () => {
@@ -268,6 +306,38 @@ describe('inert parser controls and typed wishlist completeness', () => {
       <a class="wl-see-more" href="http://www.amazon.com/hz/wishlist/ls/LIST1?page=2">More</a>
     `, 'https://www.amazon.com/hz/wishlist/ls/LIST1'), /INVALID_AMAZON_URL/);
   });
+
+  it('continues and validates Amazon slv wishlist pagination responses', () => {
+    const baseUrl = 'https://www.amazon.nl/-/en/hz/wishlist/ls/LIST1';
+    const continuationUrl = 'https://www.amazon.nl/-/en/hz/wishlist/slv/items?paginationToken=OPAQUE_TOKEN&lid=LIST1';
+    const firstPage = offscreen.parseAmazonWishlist(`
+      <input id="listId" value="LIST1"><div id="g-items">
+        <li data-itemid="ITEM1"><a href="/dp/B000000001">First product</a></li>
+      </div>
+      <a class="wl-see-more" href="${continuationUrl}">More</a>
+    `, baseUrl);
+
+    assert.equal(firstPage.items.length, 1);
+    assert.equal(firstPage.nextPageUrl, continuationUrl);
+    assert.equal(firstPage.completeness, 'partial');
+
+    const terminalSentinel = 'https://www.amazon.nl/-/en/hz/wishlist/slv/items?paginationToken=&lid=LIST1';
+    const terminalPage = offscreen.parseAmazonWishlist(`
+      <div id="g-items">
+        <li data-itemid="ITEM2"><a href="/dp/B000000002">Second product</a></li>
+      </div>
+      <a class="wl-see-more" href="${terminalSentinel}">More</a>
+    `, continuationUrl);
+    assert.equal(terminalPage.items.length, 1);
+    assert.equal(terminalPage.nextPageUrl, null);
+    assert.equal(terminalPage.completeness, 'validated');
+
+    const unstructuredContinuation = offscreen.parseAmazonWishlist(
+      '<html><body>Unexpected response</body></html>',
+      continuationUrl
+    );
+    assert.equal(unstructuredContinuation.completeness, 'indeterminate');
+  });
 });
 
 describe('bounded scraper response pipeline', () => {
@@ -320,6 +390,55 @@ describe('bounded scraper response pipeline', () => {
     assert.equal(result.complete, false);
     assert.equal(result.completeness, 'indeterminate');
     assert.equal(result.stopReason, 'indeterminate_page');
+  });
+
+  it('follows Amazon slv continuation fragments through the real parser contract', async () => {
+    Math.random = () => 0;
+    const firstUrl = 'https://www.amazon.nl/hz/wishlist/ls/LIST1';
+    const continuationUrl = 'https://www.amazon.nl/-/en/hz/wishlist/slv/items?paginationToken=TOKEN1&lid=LIST1';
+    const terminalSentinel = 'https://www.amazon.nl/-/en/hz/wishlist/slv/items?paginationToken=&lid=LIST1';
+    const responses = new Map([
+      [firstUrl, `
+        <input id="listId" value="LIST1">
+        <div id="g-items">
+          <li data-itemid="ITEM1"><a href="/dp/B000000001">First product</a></li>
+        </div>
+        <a class="wl-see-more" href="${continuationUrl}">More</a>
+      `],
+      [continuationUrl, `
+        <div id="g-items">
+          <li data-itemid="ITEM2"><a href="/dp/B000000002">Second product</a></li>
+        </div>
+        <a class="wl-see-more" href="${terminalSentinel}">More</a>
+      `]
+    ]);
+    const fetchedUrls = [];
+    globalThis.fetch = async (url) => {
+      const href = String(url);
+      fetchedUrls.push(href);
+      assert.ok(responses.has(href), `unexpected wishlist fetch: ${href}`);
+      return htmlResponse(responses.get(href), href);
+    };
+    globalThis.chrome.runtime.sendMessage = async (message) => {
+      if (message.type === 'PARSE_AMAZON_WISHLIST') {
+        return { data: offscreen.parseAmazonWishlist(message.html, message.url) };
+      }
+      return {};
+    };
+
+    const result = await scraper.scrapeAmazonWishlist(firstUrl, {
+      maxPages: 3,
+      maxItems: 10,
+      maxTotalBytes: 64 * 1024,
+      maxElapsedMs: 10_000
+    });
+
+    assert.deepEqual(fetchedUrls, [firstUrl, continuationUrl]);
+    assert.deepEqual(result.items.map((item) => item.id), ['B000000001', 'B000000002']);
+    assert.equal(result.complete, true);
+    assert.equal(result.completeness, 'validated');
+    assert.equal(result.pagesProcessed, 2);
+    assert.equal(result.stopReason, 'complete');
   });
 
   it('times out a body that never finishes and preserves queue progress semantics', async () => {

@@ -21,6 +21,7 @@ const AMAZON_IMAGE_HOSTS = new Set([
 ]);
 
 const WISHLIST_PATH_PATTERN = /\/(?:hz\/)?wishlist\/ls\/([a-z0-9_=-]{1,64})(?:[/?#]|$)/i;
+const WISHLIST_CONTINUATION_PATH_PATTERN = /^\/(?:-\/[a-z]{2}(?:-[a-z]{2})?\/)?hz\/wishlist\/slv\/items\/?$/i;
 const WISHLIST_ID_PATTERN = /^[a-z0-9_=-]{1,64}$/i;
 const PRODUCT_PATH_PATTERN = /\/(?:dp|gp\/product)\/([a-z0-9]{10})(?:[/?#]|$)/i;
 const MAX_URL_LENGTH = 2048;
@@ -58,7 +59,19 @@ export function isCanonicalAmazonUrl(value) {
 
 export function getAmazonWishlistId(value) {
   const parsed = parseCanonicalAmazonUrl(value);
-  return parsed?.pathname.match(WISHLIST_PATH_PATTERN)?.[1] || null;
+  if (!parsed) return null;
+  const pathId = parsed.pathname.match(WISHLIST_PATH_PATTERN)?.[1];
+  if (pathId) return pathId;
+  if (!WISHLIST_CONTINUATION_PATH_PATTERN.test(parsed.pathname)) return null;
+
+  const listIds = parsed.searchParams.getAll('lid');
+  const paginationTokens = parsed.searchParams.getAll('paginationToken');
+  return listIds.length === 1 &&
+    WISHLIST_ID_PATTERN.test(listIds[0]) &&
+    paginationTokens.length === 1 &&
+    paginationTokens[0]
+    ? listIds[0]
+    : null;
 }
 
 export function parseCanonicalAmazonWishlistUrl(value) {
@@ -138,7 +151,13 @@ export function resolveAmazonWishlistPageUrl(value, baseUrl) {
     if (!parsed) return null;
 
     const expectedId = getAmazonWishlistId(baseUrl);
-    return expectedId && getAmazonWishlistId(parsed.href) === expectedId ? parsed : null;
+    if (!expectedId || getAmazonWishlistId(parsed.href) !== expectedId) return null;
+    const base = parseCanonicalAmazonUrl(baseUrl);
+    if (
+      WISHLIST_CONTINUATION_PATH_PATTERN.test(parsed.pathname) &&
+      (!base || parsed.origin !== base.origin)
+    ) return null;
+    return parsed;
   } catch (_error) {
     return null;
   }
