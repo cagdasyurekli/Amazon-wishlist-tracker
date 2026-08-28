@@ -329,6 +329,28 @@ function extractWishlistItemsFromPage() {
   return items;
 }
 
+function extractVisibleWishlistId() {
+  const pathMatch = window.location.pathname.match(
+    /\/(?:hz\/)?wishlist\/ls\/([a-z0-9_=-]{1,64})(?:[/?#]|$)/i
+  );
+  if (pathMatch) return pathMatch[1];
+
+  // Amazon.nl can render the selected list at the generic /wishlist URL.
+  // Product links still bind every visible row to the selected list via colid.
+  const productLinks = document.querySelectorAll(
+    'li[data-itemid] a[href*="/dp/"][href*="colid="], div[data-itemid] a[href*="/dp/"][href*="colid="]'
+  );
+  for (const link of productLinks) {
+    try {
+      const wishlistId = new URL(link.href, window.location.href).searchParams.get('colid');
+      if (/^[a-z0-9_=-]{1,64}$/i.test(wishlistId || '')) return wishlistId;
+    } catch (_error) {
+      // Ignore malformed page-owned links and continue looking for a valid row.
+    }
+  }
+  return null;
+}
+
 // Message listener for popup requesting to track current page. Responds with the
 // add result so the popup can show feedback instead of guessing.
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -343,7 +365,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message.type === 'EXTRACT_VISIBLE_WISHLIST') {
     const items = extractWishlistItemsFromPage();
-    sendResponse({ success: true, items, limited: items.length >= MAX_VISIBLE_WISHLIST_ROWS });
+    sendResponse({
+      success: true,
+      items,
+      wishlistId: extractVisibleWishlistId(),
+      limited: items.length >= MAX_VISIBLE_WISHLIST_ROWS
+    });
     return true;
   }
 });

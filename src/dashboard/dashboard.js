@@ -2,6 +2,7 @@ import { getTrackedItems, getStorageData, formatPrice, StorageKeys, StorageArea 
 import {
   getAmazonAsin,
   getAmazonWishlistId,
+  isAmazonWishlistPageUrl,
   normalizeStoredAmazonProductUrl,
   parseCanonicalAmazonProductUrl,
   parseCanonicalAmazonWishlistUrl,
@@ -451,29 +452,41 @@ document.addEventListener('DOMContentLoaded', async () => {
     return Boolean(aId && bId && aId === bId);
   }
 
-  function findVisibleWishlistTab(url, tabs) {
-    return tabs.find(tab => {
+  function findVisibleWishlistTabs(url, tabs) {
+    return tabs.filter(tab => {
       const tabUrl = tab?.url || '';
-      return Boolean(parseCanonicalAmazonWishlistUrl(tabUrl)) && isSameWishlistUrl(tabUrl, url);
+      if (!isAmazonWishlistPageUrl(tabUrl)) return false;
+      const tabWishlistId = getWishlistId(tabUrl);
+      return !tabWishlistId || isSameWishlistUrl(tabUrl, url);
     });
   }
 
   function extractVisibleWishlistFromOpenTab(url) {
     return new Promise((resolve) => {
-      chrome.tabs.query({}, (tabs) => {
-        const wishlistTab = findVisibleWishlistTab(url, tabs);
-        if (!wishlistTab?.id) {
+      chrome.tabs.query({}, async (tabs) => {
+        const wishlistId = getWishlistId(url);
+        const wishlistTabs = findVisibleWishlistTabs(url, tabs);
+        if (!wishlistTabs.length || !wishlistId) {
           resolve(null);
           return;
         }
 
-        chrome.tabs.sendMessage(wishlistTab.id, { type: 'EXTRACT_VISIBLE_WISHLIST' }, (response) => {
-          if (chrome.runtime.lastError || !response?.success || !response.items?.length) {
-            resolve(null);
+        for (const wishlistTab of wishlistTabs) {
+          const response = await new Promise((resolveResponse) => {
+            chrome.tabs.sendMessage(wishlistTab.id, { type: 'EXTRACT_VISIBLE_WISHLIST' }, (value) => {
+              if (chrome.runtime.lastError) {
+                resolveResponse(null);
+                return;
+              }
+              resolveResponse(value);
+            });
+          });
+          if (response?.success && response.items?.length && response.wishlistId === wishlistId) {
+            resolve(response);
             return;
           }
-          resolve(response);
-        });
+        }
+        resolve(null);
       });
     });
   }

@@ -1,6 +1,6 @@
 {
   "name": "amazon-wishlist-tracker",
-  "version": "1.4.1",
+  "version": "1.4.2",
   "private": true,
   "description": "Privacy-first Manifest V3 extension for tracking Amazon product and wishlist prices locally.",
   "scripts": {

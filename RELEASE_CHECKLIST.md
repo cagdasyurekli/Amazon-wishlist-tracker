@@ -27,8 +27,8 @@ Automated evidence covers the large-list, narrow-width, 200% zoom, accessible-na
 
 ## Version bump and stable-candidate rerun
 
-- [x] Change `manifest.json`, `package.json`, and `package-lock.json` from `1.4.0` to `1.4.1` together.
-- [x] Move the relevant `CHANGELOG.md` entries from **Unreleased** to a dated `1.4.1` section.
+- [x] Change `manifest.json`, `package.json`, and `package-lock.json` from `1.4.1` to `1.4.2` together.
+- [x] Move the relevant `CHANGELOG.md` entries from **Unreleased** to a dated `1.4.2` section.
 - [x] Run `npm run release:check` again after the version bump on the final same-candidate tree; retain the output before push and tag creation.
 - [x] Load that exact directory as an unpacked extension in an isolated real-Chrome test profile and verify the extension ID, displayed version, toolbar icon, popup, dashboard, options, and background service worker.
 

@@ -66,6 +66,12 @@ export function parseCanonicalAmazonWishlistUrl(value) {
   return parsed && getAmazonWishlistId(parsed.href) ? parsed : null;
 }
 
+export function isAmazonWishlistPageUrl(value) {
+  const parsed = parseCanonicalAmazonUrl(value);
+  if (!parsed) return false;
+  return Boolean(getAmazonWishlistId(parsed.href)) || /\/wishlist\/?$/i.test(parsed.pathname);
+}
+
 export function getAmazonAsin(value) {
   const parsed = parseCanonicalAmazonUrl(value);
   return parsed?.pathname.match(PRODUCT_PATH_PATTERN)?.[1]?.toUpperCase() || null;
