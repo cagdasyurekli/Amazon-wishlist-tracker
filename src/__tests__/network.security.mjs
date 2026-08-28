@@ -98,6 +98,10 @@ describe('canonical Amazon URL and image policy', () => {
       const wishlistUrl = `https://www.${domain}/hz/wishlist/ls/LIST=1-ABC?viewType=list`;
       assert.ok(amazon.parseCanonicalAmazonWishlistUrl(wishlistUrl));
       assert.equal(amazon.getAmazonWishlistId(wishlistUrl), 'LIST=1-ABC');
+      assert.equal(amazon.isAmazonWishlistPageUrl(wishlistUrl), true);
+      assert.equal(amazon.isAmazonWishlistPageUrl(`https://www.${domain}/wishlist`), true);
+      assert.equal(amazon.isAmazonWishlistPageUrl(`https://www.${domain}/-/en/wishlist/`), true);
+      assert.equal(amazon.isAmazonWishlistPageUrl(`https://www.${domain}/dp/B000000001`), false);
     }
     for (const value of [
       'http://www.amazon.com/dp/B000000001',

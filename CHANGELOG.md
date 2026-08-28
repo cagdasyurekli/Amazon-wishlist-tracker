@@ -4,6 +4,12 @@ All notable changes to this project are documented here. Versions follow semanti
 
 ## [Unreleased]
 
+## [1.4.2] - 2026-08-28
+
+### Fixed
+
+- Manual sync now recognizes Amazon's signed-in generic `/wishlist` route and accepts its visible products only after their bounded `colid` matches the tracked wishlist, avoiding the failing unauthenticated background fallback.
+
 ## [1.4.1] - 2026-08-28
 
 ### Fixed

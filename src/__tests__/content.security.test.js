@@ -118,10 +118,10 @@ describe('content-script tracking boundary', () => {
       <div id="buybox"></div>
       <div id="g-items">
         <li data-itemid="amazon-nl-item">
-          <a href="/-/en/dp/B000000001" title="Regional Product">
+          <a href="/-/en/dp/B000000001?colid=NL_LIST_1" title="Regional Product">
             <img src="https://m.media-amazon.com/images/I/book.jpg" alt="Regional Product">
           </a>
-          <h2><a id="itemName_B000000001" href="/-/en/dp/B000000001" title="Regional Product">Regional Product</a></h2>
+          <h2><a id="itemName_B000000001" href="/-/en/dp/B000000001?colid=NL_LIST_1" title="Regional Product">Regional Product</a></h2>
           <span class="a-price"><span class="a-offscreen">€19.95</span></span>
         </li>
       </div>`;
@@ -131,6 +131,7 @@ describe('content-script tracking boundary', () => {
     contentMessageListener({ type: 'EXTRACT_VISIBLE_WISHLIST' }, { id: 'test-extension' }, (value) => { response = value; });
 
     expect(response.items).toHaveLength(1);
+    expect(response.wishlistId).toBe('NL_LIST_1');
     expect(response.items[0]).toMatchObject({
       id: 'B000000001',
       title: 'Regional Product',
