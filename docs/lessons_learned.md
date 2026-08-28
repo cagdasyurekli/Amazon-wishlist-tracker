@@ -173,6 +173,8 @@ Verified: all six tab contexts in the harness, add-flow state transition, 22/22 
 
 - 🟢 **Selector fragility.** Amazon rotates price containers frequently. The current ordered list lives in `priceSelectors` in [offscreen.js](../src/background/offscreen.js). When a selector dies, add the new one to the *front* of the list and add a fixture-based test rather than editing logic. Known-good-as-of-this-review IDs: `#corePrice_feature_div`, `#corePriceDisplay_desktop_feature_div`, legacy `#priceblock_ourprice` / `#priceblock_dealprice`, and `.reinventPricePriceToPayMargin .a-offscreen`.
 
+- 🟠 **Selector-list order is not fallback priority.** `querySelector('preferred, fallback')` returns the earliest matching element in document order. Amazon.nl places an image-only product link before its named wishlist title link, so visible extraction silently dropped every row when the combined selector chose the empty link. Use explicit `preferred || fallback` queries when semantic priority matters, and keep a fixture where the image link precedes the title.
+
 - 🟢 **Amazon DOM variants added (Codex, FIXED).** Parser coverage now includes `#apex_desktop`, split `.a-price-whole`/`.a-price-fraction` prices without `.a-offscreen`, "Usually ships..." as orderable, and "not available" as a negative availability phrase. Keep adding fixture-style tests for every selector change.
 
 ## 2. Chrome Extension Architecture

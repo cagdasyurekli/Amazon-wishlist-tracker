@@ -113,6 +113,32 @@ describe('content-script tracking boundary', () => {
     expect(response.items[0].url).toBe('https://www.amazon.com/dp/B000000000');
   });
 
+  it('prefers the named wishlist title over an earlier image-only product link', () => {
+    document.body.innerHTML = `
+      <div id="buybox"></div>
+      <div id="g-items">
+        <li data-itemid="amazon-nl-item">
+          <a href="/-/en/dp/B000000001" title="Regional Product">
+            <img src="https://m.media-amazon.com/images/I/book.jpg" alt="Regional Product">
+          </a>
+          <h2><a id="itemName_B000000001" href="/-/en/dp/B000000001" title="Regional Product">Regional Product</a></h2>
+          <span class="a-price"><span class="a-offscreen">€19.95</span></span>
+        </li>
+      </div>`;
+    require('../content/content.js');
+
+    let response;
+    contentMessageListener({ type: 'EXTRACT_VISIBLE_WISHLIST' }, { id: 'test-extension' }, (value) => { response = value; });
+
+    expect(response.items).toHaveLength(1);
+    expect(response.items[0]).toMatchObject({
+      id: 'B000000001',
+      title: 'Regional Product',
+      currentPrice: 19.95,
+      currency: '€'
+    });
+  });
+
   test.each(availabilityFixtures)('uses shared $locale unavailable phrases for visible wishlist rows', ({ available, unavailable }) => {
     document.body.innerHTML = `
       <div id="buybox"></div>

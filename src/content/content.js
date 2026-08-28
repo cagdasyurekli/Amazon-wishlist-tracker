@@ -244,7 +244,13 @@ function extractWishlistItemsFromPage() {
     const asin = asinMatch ? asinMatch[1] : null;
     if (!asin || items.some(item => item.id === asin)) return;
 
-    const titleEl = row.querySelector('[id^="itemName_"], h2 a, a[href*="/dp/"]');
+    // querySelector() with a selector list returns the first matching node in
+    // document order, not the first selector in the list. Amazon.nl places an
+    // image-only product link before the named title link, so select each
+    // fallback separately to preserve the intended priority.
+    const titleEl = row.querySelector('[id^="itemName_"]') ||
+      row.querySelector('h2 a') ||
+      productLink;
     const title = (titleEl?.textContent || '').replace(/\s+/g, ' ').trim().slice(0, MAX_WISHLIST_TITLE_LENGTH);
     if (!title) return;
     const authors = extractAuthorNames(

@@ -4,6 +4,12 @@ All notable changes to this project are documented here. Versions follow semanti
 
 ## [Unreleased]
 
+## [1.4.1] - 2026-08-28
+
+### Fixed
+
+- Visible Amazon.nl wishlist sync now prefers the named product-title link over an earlier image-only link, preventing every rendered row from being discarded before the safe background fallback.
+
 ## [1.4.0] - 2026-08-26
 
 ### Added
