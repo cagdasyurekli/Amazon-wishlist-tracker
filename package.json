@@ -33,7 +33,7 @@
     "eslint": "^10.9.1",
     "jest": "^30.4.2",
     "jest-environment-jsdom": "^30.4.1",
-    "puppeteer": "25.8.0"
+    "puppeteer": "25.9.0"
   },
   "overrides": {
     "js-yaml": "3.15.1",
