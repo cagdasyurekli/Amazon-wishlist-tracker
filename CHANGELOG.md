@@ -4,6 +4,17 @@ All notable changes to this project are documented here. Versions follow semanti
 
 ## [Unreleased]
 
+## [1.4.5] - 2026-09-01
+
+### Fixed
+
+- Complete, identity-validated manual and automatic wishlist syncs now stop tracking products Amazon marks as purchased, including products that were also tracked individually, while retaining their existing price history.
+- Partial or interrupted wishlist reads remain non-destructive, and purchased words inside a product title or byline no longer count as purchase status.
+
+### Security
+
+- Updated the locked Browserslist development dependency and its browser-data helpers to resolve the current high-severity audit advisories; the release audit reports zero vulnerabilities.
+
 ## [1.4.4] - 2026-08-28
 
 ### Fixed
