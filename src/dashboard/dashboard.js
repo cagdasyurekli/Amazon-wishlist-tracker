@@ -677,7 +677,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     chrome.runtime.sendMessage({
       type: 'BULK_ADD_TRACKED_ITEMS',
       items: syncedItems,
-      historyGeneration: response.historyGeneration || 0
+      historyGeneration: response.historyGeneration || 0,
+      syncWishlistUrl: url,
+      complete: response.complete === true
     }, async (saveResponse) => {
       buttonEl.textContent = originalText;
       buttonEl.disabled = false;

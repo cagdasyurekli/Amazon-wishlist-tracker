@@ -356,6 +356,49 @@ describe('Chrome extension E2E', () => {
     expect(result.priceHistory.B012345678[1].timestamp).toBe(syncedItem.lastChecked);
   }, 30000);
 
+  it('removes a purchased product after a complete manual wishlist sync', async () => {
+    await launchExtension();
+
+    const page = await browser.newPage();
+    await page.goto(`chrome-extension://${extensionId}/src/dashboard/dashboard.html`, {
+      waitUntil: 'domcontentloaded'
+    });
+
+    const result = await page.evaluate(async () => {
+      const id = 'BTHINKFAST';
+      const history = [{ price: 12.99, timestamp: 123 }];
+      const product = {
+        id,
+        title: 'Thinking, Fast and Slow',
+        url: `https://www.amazon.nl/dp/${id}`,
+        currentPrice: 12.99,
+        originalPrice: 12.99,
+        currency: '€',
+        inStock: true,
+        trackedIndividually: true,
+        wishlistIds: ['LIST-A']
+      };
+      await chrome.storage.local.set({
+        trackedItems: [product],
+        priceHistory: { [id]: history }
+      });
+
+      const response = await chrome.runtime.sendMessage({
+        type: 'BULK_ADD_TRACKED_ITEMS',
+        historyGeneration: 0,
+        items: [{ ...product, isPurchased: true }],
+        syncWishlistUrl: 'https://www.amazon.nl/hz/wishlist/ls/LIST-A',
+        complete: true
+      });
+      const stored = await chrome.storage.local.get(['trackedItems', 'priceHistory']);
+      return { response, stored, id };
+    });
+
+    expect(result.response).toEqual({ success: true });
+    expect(result.stored.trackedItems).toEqual([]);
+    expect(result.stored.priceHistory[result.id]).toEqual([{ price: 12.99, timestamp: 123 }]);
+  }, 30000);
+
   it('restores the one-shot wishlist continuation alarm when persisted pagination state exists', async () => {
     const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'amazon-wishlist-e2e-'));
     temporaryProfiles = [profile];

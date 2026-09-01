@@ -260,6 +260,43 @@ describe('bounded and fair wishlist continuation', () => {
     assert.deepEqual(harness.storage.get('trackedItems'), []);
   });
 
+  it('removes a purchased wishlist-only item after a complete reconciliation', async () => {
+    const id = 'B000000001';
+    const harness = await loadHarness({
+      trackedItems: [{ ...wishlistItem(id), trackedIndividually: false, wishlistIds: ['LIST-A'] }],
+      scrapeResult: {
+        success: true,
+        complete: true,
+        items: [{ ...wishlistItem(id), isPurchased: true }],
+        pagesProcessed: 1,
+        bytesProcessed: 1000
+      }
+    });
+
+    await harness.api.runWishlistCheckBatch();
+
+    assert.deepEqual(harness.storage.get('trackedItems'), []);
+  });
+
+  it('does not remove a purchased item from an incomplete wishlist traversal', async () => {
+    const id = 'B000000001';
+    const harness = await loadHarness({
+      trackedItems: [{ ...wishlistItem(id), trackedIndividually: false, wishlistIds: ['LIST-A'] }],
+      scrapeResult: {
+        success: true,
+        complete: false,
+        nextPageUrl: 'https://www.amazon.com/hz/wishlist/ls/LIST-A?page=2',
+        items: [{ ...wishlistItem(id), isPurchased: true }],
+        pagesProcessed: 1,
+        bytesProcessed: 1000
+      }
+    });
+
+    await harness.api.runWishlistCheckBatch();
+
+    assert.equal(harness.storage.get('trackedItems').length, 1);
+  });
+
   it('persists cumulative metrics and advances to the next wishlist after a partial chunk', async () => {
     const startedAt = Date.now() - 60_000;
     const harness = await loadHarness({

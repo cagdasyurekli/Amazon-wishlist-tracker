@@ -60,8 +60,8 @@ This document defines the expected behavior of all features in the Amazon Wishli
 - **Behavior:** Fires when an item transitions strictly from "Out of Stock" to "In Stock".
 - **Anti-Spam:** Does not fire on the very first scrape of a newly tracked item, even if it is currently in stock.
 
-### 2.4 Purchased Text Safety
-- **Behavior:** Amazon-derived "purchased" text is advisory and untrusted. It must never automatically remove a tracked product, delete price history, or send a destructive-state notification.
+### 2.4 Purchased Product Reconciliation
+- **Behavior:** A product marked as purchased in a structurally complete, identity-validated wishlist sync is removed from the tracking list, including when it was also tracked individually. Its existing price history is retained. Purchased text from a standalone product scrape or an incomplete wishlist traversal remains advisory and must not remove a product or send a destructive-state notification.
 
 ### 2.5 Extension Icon Badge
 - **Behavior:** A red numerical badge on the extension icon displays the total number of tracked items that currently meet their discount or target price conditions.

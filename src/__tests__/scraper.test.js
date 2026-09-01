@@ -70,6 +70,26 @@ describe('Amazon HTML Parser (Offscreen Worker)', () => {
     expect(data.items[0].authors).toEqual(['Mehmet Demir']);
   });
 
+  it('recognizes purchased wishlist status without trusting the product title', () => {
+    const result = parseAmazonWishlist(`
+      <html><body>
+        <input name="listId" value="LIST1">
+        <div id="g-items">
+          <li data-itemid="ITEM1">
+            <a id="itemName_B000000001" href="/dp/B000000001">Thinking, Fast and Slow</a>
+            <span>Purchased on 1 September 2026</span>
+          </li>
+          <li data-itemid="ITEM2">
+            <a id="itemName_B000000002" href="/dp/B000000002">I Purchased This Book</a>
+          </li>
+        </div>
+      </body></html>
+    `, 'https://www.amazon.com/hz/wishlist/ls/LIST1');
+
+    expect(result.items[0].isPurchased).toBe(true);
+    expect(result.items[1].isPurchased).toBe(false);
+  });
+
   it('should throw an error if a CAPTCHA is detected via the title', () => {
     const html = `
       <html>

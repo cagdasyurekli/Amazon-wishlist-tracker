@@ -869,6 +869,37 @@ describe('scraped purchase text handling', () => {
     assert.equal(harness.getTrackedItems().length, 1);
     assert.equal(harness.getTrackedItems()[0].id, 'B000000001');
   });
+
+  it('removes a purchased product reported by a complete manual wishlist sync', async () => {
+    const original = item('B000000001', {
+      trackedIndividually: true,
+      wishlistIds: ['LIST-A']
+    });
+    const history = { B000000001: [{ price: 20, timestamp: 1 }] };
+    const harness = await loadBackground([original], { priceHistory: history });
+
+    const partialResponse = await harness.sendMessage({
+      type: 'BULK_ADD_TRACKED_ITEMS',
+      items: [{ ...original, isPurchased: true }],
+      syncWishlistUrl: 'https://www.amazon.com/hz/wishlist/ls/LIST-A',
+      complete: false,
+      historyGeneration: 1
+    }, dashboardSender());
+    assert.equal(partialResponse.success, true);
+    assert.equal(harness.getTrackedItems().length, 1);
+
+    const completeResponse = await harness.sendMessage({
+      type: 'BULK_ADD_TRACKED_ITEMS',
+      items: [{ ...original, isPurchased: true }],
+      syncWishlistUrl: 'https://www.amazon.com/hz/wishlist/ls/LIST-A',
+      complete: true,
+      historyGeneration: 0
+    }, dashboardSender());
+
+    assert.equal(completeResponse.success, true);
+    assert.equal(harness.getTrackedItems().length, 0);
+    assert.deepEqual(harness.getPriceHistory(), history);
+  });
 });
 
 describe('target price notifications', () => {

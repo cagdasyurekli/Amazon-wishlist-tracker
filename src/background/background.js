@@ -828,6 +828,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             rawItemsById.set(id, { ...rawItem, id });
           });
           const rawItems = [...rawItemsById.values()];
+          const syncWishlistUrl = typeof message.syncWishlistUrl === 'string'
+            ? parseCanonicalAmazonWishlistUrl(message.syncWishlistUrl)
+            : null;
+          const isCompleteWishlistSync = message.complete === true && syncWishlistUrl != null;
+          const purchasedIds = isCompleteWishlistSync
+            ? new Set(rawItems.filter((item) => item.isPurchased === true).map((item) => item.id))
+            : new Set();
+          const activeRawItems = rawItems.filter((item) => !purchasedIds.has(item.id));
           const historyObj = await getStorageData(StorageKeys.PRICE_HISTORY, StorageArea.LOCAL) || {};
           const historyBaselineLengths = captureHistoryLengths(historyObj);
           const historyChangedIds = new Set();
@@ -852,13 +860,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           };
 
           await updateTrackedItems((items) => {
-            const existingIds = new Set(items.map((item) => item.id));
-            const newCount = rawItems.filter((item) => !existingIds.has(item.id)).length;
-            if (items.length + newCount > MAX_TRACKED_ITEMS) {
+            const remainingItems = purchasedIds.size > 0
+              ? items.filter((item) => !purchasedIds.has(item.id))
+              : items;
+            const existingIds = new Set(remainingItems.map((item) => item.id));
+            const newCount = activeRawItems.filter((item) => !existingIds.has(item.id)).length;
+            if (remainingItems.length + newCount > MAX_TRACKED_ITEMS) {
               throw new Error(`Tracking is limited to ${MAX_TRACKED_ITEMS} products.`);
             }
-            rawItems.forEach(rawItem => {
-              const existingItem = items.find(i => i.id === rawItem.id);
+            activeRawItems.forEach(rawItem => {
+              const existingItem = remainingItems.find(i => i.id === rawItem.id);
               const newItem = sanitizeBulkTrackedItem(rawItem, existingItem || null);
               if (!existingItem) {
                 const itemToSave = {
@@ -873,7 +884,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 if (defaultDiscount && !itemToSave.targetDiscountPercentage) {
                   itemToSave.targetDiscountPercentage = defaultDiscount;
                 }
-                items.push(itemToSave);
+                remainingItems.push(itemToSave);
                 recordWishlistFetch(itemToSave.id, itemToSave.currentPrice);
                 setNextAdaptiveCheck(itemToSave, historyObj, checkedAt);
                 return;
@@ -898,7 +909,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               recordWishlistFetch(existingItem.id, newItem.currentPrice);
               setNextAdaptiveCheck(existingItem, historyObj, checkedAt);
             });
-            return items;
+            return remainingItems;
           });
           await scheduleStandardPriceCheck();
 
@@ -1018,12 +1029,14 @@ export async function persistScrapeResults(
   changedIds,
   newIds = new Set(),
   removedIds = new Set(),
-  removalWishlistId = null
+  removalWishlistId = null,
+  forceRemovedIds = new Set()
 ) {
   const scrapedById = new Map(scrapedItems.map(item => [item.id, item]));
   await updateTrackedItems((latestItems) => {
     const latestIds = new Set(latestItems.map(item => item.id));
     const merged = latestItems.flatMap((current) => {
+      if (forceRemovedIds.has(current.id)) return [];
       if (removedIds.has(current.id)) {
         const currentWishlistIds = Array.isArray(current.wishlistIds) ? current.wishlistIds : [];
         const remainingWishlistIds = removalWishlistId
@@ -1308,6 +1321,7 @@ export async function runWishlistCheckBatch() {
   const changedIds = new Set();
   const newIds = new Set();
   const removedIds = new Set();
+  const purchasedIds = new Set();
   const startCursor = Number.isInteger(cursorValue) ? cursorValue % wishlists.length : 0;
   const wl = wishlists[startCursor];
   const wishlistId = wl.id;
@@ -1378,6 +1392,12 @@ export async function runWishlistCheckBatch() {
           } else if (result.complete === true) {
             if (stateKey) delete syncState[stateKey];
             result.items.forEach(extractedItem => {
+              if (extractedItem?.isPurchased === true) {
+                purchasedIds.add(extractedItem.id);
+                removedIds.add(extractedItem.id);
+                changedItems = true;
+                return;
+              }
               const trackedItem = trackedById.get(extractedItem.id);
               const simulatedResult = {
                 success: true,
@@ -1433,7 +1453,9 @@ export async function runWishlistCheckBatch() {
             // Only reconcile removals after a complete, structurally validated
             // traversal. Partial or budget-limited results cannot remove data.
             if (typeof wl !== 'string' && wl.autoSync && wishlistId) {
-              const visibleIds = new Set(result.items.map(item => item.id));
+              const visibleIds = new Set(
+                result.items.filter((item) => !purchasedIds.has(item.id)).map((item) => item.id)
+              );
               items.forEach((item) => {
                 if (!item.wishlistIds?.includes(wishlistId) || visibleIds.has(item.id)) return;
                 item.wishlistIds = item.wishlistIds.filter(id => id !== wishlistId);
@@ -1475,7 +1497,7 @@ export async function runWishlistCheckBatch() {
     [StorageKeys.WISHLIST_SCRAPE_STATE]: syncState
   };
   if (changedItems) {
-    await persistScrapeResults(items, changedIds, newIds, removedIds, wishlistId);
+    await persistScrapeResults(items, changedIds, newIds, removedIds, wishlistId, purchasedIds);
     await persistHistoryAppends(historyObj, historyBaselineLengths, changedIds);
   }
   await setStorageItems(updates, StorageArea.LOCAL);

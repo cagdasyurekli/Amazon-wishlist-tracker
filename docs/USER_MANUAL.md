@@ -125,6 +125,11 @@ products and stop tracking products removed from that wishlist. A product is pre
 when it is also tracked individually or belongs to another tracked wishlist. Partial or
 interrupted wishlist scans do not remove missing products.
 
+When a complete wishlist scan reports a product as purchased, the extension removes
+that product from tracking so its old price target no longer produces alerts. The same
+rule applies to **Sync Wishlist Now**. Existing price history stays stored, and partial
+or interrupted scans never remove a product from purchased text alone.
+
 Each product keeps its own Amazon marketplace link. After an update, an older wishlist
 record whose marketplace cannot be determined is shown for region review and will not
 sync automatically. Import that wishlist again using its real Amazon URL to resolve it;

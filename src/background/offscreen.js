@@ -514,7 +514,14 @@ function parseAmazonWishlist(htmlString, url) {
       imageUrl = imgEl.dataset.safeImageUrl;
     }
 
-    const isPurchased = itemText.includes('purchased') || itemText.includes('gekocht') || itemText.includes('you own this item');
+    const purchaseStatusRoot = el.cloneNode(true);
+    purchaseStatusRoot.querySelectorAll(
+      'a[href*="/dp/"], [id^="item-byline"], [class*="item-byline"]'
+    ).forEach((node) => node.remove());
+    const purchaseStatusText = purchaseStatusRoot.textContent.toLowerCase();
+    const isPurchased = purchaseStatusText.includes('purchased') ||
+      purchaseStatusText.includes('gekocht') ||
+      purchaseStatusText.includes('you own this item');
 
     // Only add if not already in our extracted list (duplicates sometimes exist)
     if (!items.find(i => i.id === asin)) {
