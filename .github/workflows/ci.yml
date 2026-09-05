@@ -31,7 +31,7 @@ jobs:
           cache: npm
 
       - name: Install locked dependencies
-        run: npm ci
+        run: npm ci --no-audit
 
       - name: Verify release candidate
         run: npm run release:check
