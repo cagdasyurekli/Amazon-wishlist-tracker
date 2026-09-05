@@ -8,20 +8,30 @@ const extensionRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)),
 let browser;
 
 function within(promise, label, timeout = 10000) {
+  let timer;
   return Promise.race([
     promise,
-    new Promise((_, reject) => setTimeout(() => reject(new Error(`Timed out: ${label}`)), timeout))
-  ]);
+    new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`Timed out: ${label}`)), timeout);
+    })
+  ]).finally(() => clearTimeout(timer));
 }
 
 afterEach(async () => {
   if (browser) {
     const process = browser.process();
-    await Promise.race([
-      browser.close(),
-      new Promise((resolve) => setTimeout(resolve, 5000))
-    ]);
-    if (process && process.exitCode == null) process.kill('SIGKILL');
+    let closeTimer;
+    try {
+      await Promise.race([
+        browser.close(),
+        new Promise((resolve) => {
+          closeTimer = setTimeout(resolve, 5000);
+        })
+      ]);
+    } finally {
+      clearTimeout(closeTimer);
+      if (process && process.exitCode == null) process.kill('SIGKILL');
+    }
   }
   browser = null;
 });

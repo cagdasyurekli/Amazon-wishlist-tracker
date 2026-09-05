@@ -6,7 +6,7 @@ A privacy-first Manifest V3 Chrome extension that tracks Amazon product and wish
 
 ## What it does
 
-- Tracks products from supported Amazon regions: `.com`, `.co.uk`, `.de`, `.fr`, `.es`, `.it`, and `.nl`.
+- Tracks products from supported Amazon regions: `.com`, `.com.tr`, `.co.uk`, `.de`, `.fr`, `.es`, `.it`, and `.nl`.
 - Imports public or shared wishlists and can keep their product membership in sync.
 - Uses bounded adaptive price checks, a separate priority queue, and anti-bot backoff.
 - Shows locale-aware price formatting, timestamped availability and price history, targets, and Amazon wishlist price-drop metadata.
@@ -52,11 +52,10 @@ npm run visual:qa
 Before preparing a public release candidate, run:
 
 ```bash
-npm run audit:deps
 npm run release:check
 ```
 
-`release:check` audits dependencies, validates manifest references, icon dimensions/transparency, package/manifest/lockfile version parity, production dependency absence, local extension assets, unit tests, scraper continuation contracts, Chrome E2E tests, a synthetic five-screenshot visual pass, and `git diff --check` when executed in a Git worktree. The dependency-audit step requires current registry access.
+`release:check` blocks high- and critical-severity dependency vulnerabilities, validates manifest references, icon dimensions/transparency, package/manifest/lockfile version parity, production dependency absence, local extension assets, unit tests, scraper continuation contracts, focused security tests, Chrome E2E tests, and `git diff --check` when executed in a Git worktree. It also runs an offline visual smoke that captures five synthetic screenshots after checking required DOM states and fails on captured console or page errors; it does not compare images or measure contrast. The dependency-audit step requires current registry access. Use `npm run audit:deps` when a standalone dependency check is useful.
 
 ## Architecture
 

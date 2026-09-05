@@ -1,44 +1,58 @@
 # Release Checklist
 
-Use this checklist on one stable candidate. A green local check does not authorize a version bump, public repository change, tag, release, or Chrome Web Store submission.
+Use this reusable checklist for one stable candidate. Treat every box as pending for each release. A green check does not authorize a version bump, push, tag, GitHub release, or Chrome Web Store submission.
 
-## Before the version bump
+## Prepare one final candidate
 
-- [x] Integrate the candidate into a real Git worktree and review the complete diff, including binary icon changes.
-- [x] Confirm `git diff --check` passes; the release validator runs this automatically in a Git worktree.
-- [x] Run `npm ci` from the lockfile on Node.js 22.13 or newer.
-- [x] Run `npm run release:check` with registry access and retain the terminal output. Required evidence is zero reported audit vulnerabilities, manifest/icon/metadata validation, 70 unit tests, 4 wishlist scraper contracts, 3 wishlist source-policy contracts, 90 focused security tests, 1 real-Chrome intent test, 18 Chromium E2E tests, and the synthetic five-screenshot visual QA passing.
-- [x] Complete the independent security review on the same candidate and resolve or explicitly disposition every reportable finding. Do not infer acceptance from the automated test count.
-- [x] For Amazon markup or pagination compatibility changes, run the final candidate against a public, non-secret wishlist from the affected marketplace. Record only sanitized counts, completion state, byte/page bounds, and stop reason; never product names or list IDs. Keep this external canary out of deterministic CI.
-- [x] Confirm no credentials, exports, real wishlist data, browser profiles, `.agents/`, `.remember/`, or local editor settings are tracked.
-- [x] Read back `README.md`, `SECURITY.md`, `PRIVACY.md`, `CHANGELOG.md`, `CHROMEWEBSTORE.md`, and the license against actual runtime behavior.
+- [ ] Integrate the candidate into a real Git worktree and review the complete diff, including binary icon changes.
+- [ ] Finish the code, documentation, and review fixes before the full local gate.
+- [ ] Update `manifest.json`, `package.json`, and `package-lock.json` to the same final version, then move the relevant `CHANGELOG.md` entries from **Unreleased** to the dated release section.
+- [ ] Run `npm ci --no-audit` from the lockfile with the repository's supported Node.js version and record the Node, npm, Puppeteer, and Chrome versions used. The final `release:check` owns the dependency audit.
+- [ ] Confirm the candidate does not skip tests, weaken assertions, or include unrelated changes.
+- [ ] Confirm no credentials, exports, real wishlist data, browser profiles, `.agents/`, `.remember/`, or local editor settings are tracked.
+- [ ] Read back `README.md`, `SECURITY.md`, `PRIVACY.md`, `CHANGELOG.md`, `CHROMEWEBSTORE.md`, and the license against actual runtime behavior.
 
-## Risk-based UI acceptance matrix
+Focused checks run while preparing the candidate may be reused only while their relevant files and environment remain unchanged. After an edit, rerun the check that owns the changed bytes or contract. Do not repeat unrelated successful checks unless their evidence became stale.
 
-| Surface | Required contexts | Acceptance evidence |
-|---|---|---|
-| Popup | Supported product tab, supported wishlist tab, unsupported tab, empty state, and more than three tracked products | Correct primary action in each context; no clipped content or horizontal overflow; at most three highlights; every interactive control has an accessible name and visible keyboard focus. |
-| Dashboard | Empty, price drop, unavailable product, mixed currencies, 75 items, and 784 items | Correct summaries and badges; 50-item progressive rendering; filter/sort persistence; chart lazy rendering; scroll position preserved; no console/page errors. |
-| Dashboard sizing | 360px narrow viewport and a desktop viewport | No document or list horizontal overflow; long titles, prices, targets, and buttons remain usable at 200% zoom. |
-| Options | Defaults, saved settings, export, malformed/unsafe/valid backup selection, stale candidate replacement, expired restore confirmation, confirmed restore, first clear-history activation, expired confirmation, and confirmed deletion | Export disclosure is accurate; restore previews bounded canonical data; both destructive confirmations expire; restore replacement and history clearing preserve their documented invariants; keyboard activation works; success/error status is announced. |
-| Accessibility | Popup, dashboard, and options with keyboard only; one screen-reader pass; light and dark system themes | Logical tab and reading order; focus never disappears or becomes trapped; stateful controls announce `aria-pressed`/`aria-expanded`; status messages are announced; text and focus contrast pass WCAG AA. |
-| Logo and icons | Chrome toolbar on light/dark themes, extensions page, popup header, dashboard, options, and 128px store preview | The mark is recognizable at 16px; no opaque square or clipped edges; manifest and action icons load at 16/32/48/128px; screenshots show the final candidate. |
+## Risk-based manual QA
 
-Automated evidence covers the large-list, narrow-width, 200% zoom, accessible-name, stateful ARIA, popup-bound, destructive-confirmation, service-worker restart, manifest loading, and icon file contracts. Independent light/dark visual and contrast review plus a read-only real Amazon product-page injection smoke test are complete. A dedicated human screen-reader pass is recommended for any future store-distribution project, but Chrome Web Store distribution is not part of this source release.
+Run manual QA on each changed user-facing surface. The automated suites remain the primary regression gates, while manual work covers visual quality and accessibility behavior they cannot judge.
 
-## Version bump and stable-candidate rerun
+| Change trigger | Manual acceptance evidence |
+|---|---|
+| Popup, dashboard, options, or in-page control | Exercise the affected flow with keyboard navigation and inspect the relevant light/dark, narrow-width, 200% zoom, long-content, error, and destructive-confirmation states. Confirm affected text and focus-indicator contrast meets WCAG AA. Select only the contexts the change can affect. |
+| Shared styles, colors/themes, extension navigation, manifest behavior, or Puppeteer/Chrome dependency | Broaden the smoke across popup, dashboard, options, in-page control, extension startup, and navigation between surfaces. Check for clipped content, horizontal overflow, missing focus, and console/page errors; confirm shared text and focus-indicator contrast meets WCAG AA in both themes. |
+| Focus management, accessible names, ARIA state, live regions, or status announcements | Use keyboard-only navigation and a human screen reader on the affected flow. Confirm logical reading/tab order, visible focus, restored focus, announced state, announced success/error messages, and WCAG AA text/focus contrast. |
+| Logo or manifest icon | Inspect the Chrome toolbar and extensions page in light/dark themes plus the affected extension surfaces. Confirm the mark remains recognizable and unclipped at declared sizes. |
+| Amazon content-script injection | Perform a read-only smoke on a supported product page and confirm the control appears and responds only to a genuine user action. Do not record account or product data. |
 
-- [x] Change `manifest.json`, `package.json`, and `package-lock.json` from `1.4.4` to `1.4.5` together.
-- [x] Move the relevant `CHANGELOG.md` entries from **Unreleased** to a dated `1.4.5` section.
-- [x] Run `npm run release:check` again after the version bump on the final same-candidate tree; retain the output before push and tag creation.
-- [x] Load that exact directory as an unpacked extension in an isolated real-Chrome test profile and verify the extension ID, displayed version, toolbar icon, popup, dashboard, options, and background service worker.
+`npm run visual:qa` is an offline visual smoke. It writes five synthetic screenshots after checking a small set of required DOM states and fails on captured console or page errors. It does not compare pixels, assess layout quality, test a screen reader, or measure contrast, so inspect affected screenshots and complete the applicable manual checks above.
 
-## Public repository readiness
+For the current source distribution, use a human screen reader on any changed flow that affects semantics, focus, or announcements; automated checks are not a substitute for that assessment. A dedicated full-product screen-reader pass remains recommended for any future Chrome Web Store project and is outside the current source-release scope.
 
-- [x] Obtain separate authorization before changing repository visibility, pushing, tagging, or publishing a release.
-- [x] After a public-visibility change, read back repository visibility, default branch, license, private vulnerability reporting, and the public privacy/support URLs.
+## Independent review and Amazon compatibility
 
-## Distribution scope
+- [ ] Complete an independent security review on the stable candidate. Resolve or explicitly disposition every reportable finding; automated suite results alone do not establish security acceptance.
+- [ ] For Amazon markup or wishlist-pagination changes, run the stable candidate against a public, non-secret wishlist from the affected marketplace. Record only sanitized counts, completion state, byte/page bounds, and stop reason; never product names or list IDs. Keep this bounded live canary out of deterministic CI.
 
-- [x] Chrome Web Store submission, listing assets, contact fields, and rollout are explicitly out of scope by product-owner decision on 2026-08-24.
-- [x] Source installation through Chrome's **Load unpacked** flow remains documented and tested.
+## Final local gate
+
+- [ ] After version/changelog edits and all review fixes, run `npm run release:check` once on the final candidate with registry access and retain the output.
+- [ ] Confirm the gate passed dependency auditing, release metadata and assets, lint, unit/parser behavior, scraper continuation and source-policy contracts, focused security behavior including genuine-click enforcement, MV3 startup/UI contracts, and the offline visual smoke.
+- [ ] Confirm the dependency audit has no high- or critical-severity findings. `audit:deps` intentionally blocks at `high`; a historical zero-vulnerability result does not create a stricter release threshold.
+- [ ] Confirm critical behaviors applicable to the change, including host and sender validation, serialized storage updates, bounded/backed-off scraping, complete-only destructive wishlist reconciliation, real-versus-synthetic click handling, timeout/cleanup behavior, and extension startup/navigation.
+- [ ] Load the exact final directory as an unpacked extension in an isolated real-Chrome test profile and verify the displayed version, toolbar icon, popup, dashboard, options, and background service worker.
+
+The local result belongs to the recorded local Node/Puppeteer/Chrome environment. The GitHub CI result belongs to the exact pushed commit on a clean Linux runner; do not substitute or directly compare one for the other.
+
+## Authorized publication sequence
+
+- [ ] Obtain separate authorization before pushing, tagging, publishing a GitHub release, or changing repository visibility.
+- [ ] Push the reviewed candidate and wait for CI and CodeQL to succeed on the exact commit.
+- [ ] Check for tag and release collisions, create an annotated tag, and publish the stable GitHub release without overwriting an existing release.
+- [ ] Read back the tag target, release metadata, repository visibility, default branch, license, private vulnerability reporting, and public privacy/support URLs.
+- [ ] Keep Chrome Web Store listing assets, contact fields, submission, and rollout outside the source-release flow unless separately authorized. Source installation through Chrome's **Load unpacked** flow remains the current distribution path.
+
+## Historical v1.4.5 evidence
+
+Version 1.4.5 is a completed historical release, not a pre-checked template for later candidates. Its release commit and annotated tag resolve to `8d301cb54495316eb4170e43ed4ba89e3a02d4f3`; the [clean Linux CI run](https://github.com/cagdasyurekli/Amazon-wishlist-tracker/actions/runs/33545767398) and [GitHub source release](https://github.com/cagdasyurekli/Amazon-wishlist-tracker/releases/tag/v1.4.5) record that candidate's remote verification and publication. That CI run reported zero dependency vulnerabilities, which is historical evidence rather than the acceptance threshold for future candidates. Chrome Web Store publication was not performed.

@@ -4,6 +4,17 @@ All notable changes to this project are documented here. Versions follow semanti
 
 ## [Unreleased]
 
+## [1.4.6] - 2026-09-05
+
+### Fixed
+
+- The real-Chrome user-intent test now clears deadline and browser-shutdown timers as soon as each operation settles, without changing timeout limits, click assertions, or forced-close coverage.
+
+### Changed
+
+- CI's locked install now skips duplicate dependency-audit work while `release:check` retains the explicit high/critical gate and full test chain.
+- Release and QA guidance now uses one stable final candidate, behavior- and suite-based acceptance, affected-surface manual checks, and accurate visual-smoke boundaries; the README marketplace list now includes Amazon Turkey.
+
 ## [1.4.5] - 2026-09-01
 
 ### Fixed

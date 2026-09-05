@@ -20,11 +20,12 @@ npm run test:e2e
 Before proposing a release candidate:
 
 ```bash
-npm run audit:deps
 npm run release:check
 ```
 
-Add parser fixtures when Amazon markup changes. UI changes should cover keyboard behavior, light/dark appearance, narrow layouts, destructive-action confirmation, and large tracked lists.
+`release:check` includes the dependency gate; high- and critical-severity findings block the candidate. Use `npm run audit:deps` when a standalone dependency check is useful.
+
+Add parser fixtures when Amazon markup changes. Exercise the affected UI surfaces for keyboard behavior and visible regressions that automation cannot judge. Expand manual QA across popup, dashboard, options, and in-page controls when shared styles, navigation, manifest behavior, or the browser dependency changes. See `RELEASE_CHECKLIST.md` for the final-candidate sequence and conditional live Amazon check.
 
 ## Pull requests
 
