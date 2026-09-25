@@ -175,7 +175,10 @@
       </form>
       <div class="chart-container">
         <div class="chart-meta" aria-live="polite"></div>
-        <canvas class="price-chart" aria-hidden="true"></canvas>
+        <div class="chart-plot">
+          <canvas class="price-chart" aria-hidden="true"></canvas>
+          <div class="chart-tooltip" role="status" hidden></div>
+        </div>
         <div class="chart-samples"></div>
         <button class="details-btn secondary-btn" type="button">View all entries</button>
       </div>

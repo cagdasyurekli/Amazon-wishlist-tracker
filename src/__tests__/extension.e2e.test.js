@@ -290,9 +290,11 @@ describe('Chrome extension E2E', () => {
 
     await page.click('.item-card[data-id="B012345678"] .chart-btn');
     await page.waitForSelector('.item-card[data-id="B012345678"] .chart-meta span');
-    await expect(page.$eval('.item-card[data-id="B012345678"] .chart-meta', (node) => node.textContent)).resolves.toContain('Latest €10.99');
-    await expect(page.$eval('.item-card[data-id="B012345678"] .chart-meta', (node) => node.textContent)).resolves.toContain('2 stored samples');
-    await expect(page.$$eval('.item-card[data-id="B012345678"] .chart-sample', (rows) => rows.map(row => row.textContent))).resolves.toHaveLength(2);
+    await expect(page.$eval('.item-card[data-id="B012345678"] .chart-meta', (node) => node.textContent)).resolves.toContain('Now €10.99');
+    await expect(page.$eval('.item-card[data-id="B012345678"] .chart-meta', (node) => node.textContent)).resolves.toContain('2 stored samples · no price changes');
+    // Repeated checks at the same price collapse into one held-price row.
+    await expect(page.$$eval('.item-card[data-id="B012345678"] .chart-sample', (rows) => rows.map(row => row.textContent))).resolves.toHaveLength(1);
+    await expect(page.$eval('.item-card[data-id="B012345678"] .chart-sample', (node) => node.textContent)).resolves.toContain('2 checks');
     await expect(page.$eval('.item-card[data-id="B012345678"] .chart-samples', (node) => node.textContent)).resolves.toContain('€10.99');
 
     await page.type('#item-search-input', 'siddharth');

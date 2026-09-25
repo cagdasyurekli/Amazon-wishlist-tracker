@@ -382,12 +382,15 @@ describe('bounded price-history compaction', () => {
   });
 
   it('compacts only a changed series during a storage history mutation', async () => {
+    // Storage applies retention against the real clock, so anchor to today (noon UTC keeps
+    // the same-day samples inside one UTC day bucket) instead of the fixed NOW.
+    const LIVE_NOW = Math.floor(Date.now() / DAY) * DAY + DAY / 2;
     const oldDay = [
-      { price: 12, timestamp: NOW - 10 * DAY },
-      { price: 8, timestamp: NOW - 10 * DAY + 1 },
-      { price: 10, timestamp: NOW - 10 * DAY + 2 }
+      { price: 12, timestamp: LIVE_NOW - 10 * DAY },
+      { price: 8, timestamp: LIVE_NOW - 10 * DAY + 1 },
+      { price: 10, timestamp: LIVE_NOW - 10 * DAY + 2 }
     ];
-    const untouched = [{ price: 20, timestamp: NOW - DAY }];
+    const untouched = [{ price: 20, timestamp: LIVE_NOW - DAY }];
     const { api, areas } = await loadStorage({
       local: { priceHistory: { B000000001: oldDay, B000000002: untouched } },
       sync: { settings: { historyRetentionDays: '30' } }
@@ -395,7 +398,7 @@ describe('bounded price-history compaction', () => {
 
     await api.updatePriceHistory((history) => ({
       ...history,
-      B000000001: [...history.B000000001, { price: 9, timestamp: NOW - DAY }]
+      B000000001: [...history.B000000001, { price: 9, timestamp: LIVE_NOW - DAY }]
     }));
 
     assert.deepEqual(

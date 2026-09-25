@@ -165,6 +165,11 @@ popup.
   information, and timestamped history.
 - Select **History** for one product or **Expand Visible Histories** for all currently
   rendered products.
+- The history chart is a step line over real time: a flat stretch means the price held
+  for that long. Hover or tap the chart, or focus it and use the Left/Right arrow keys,
+  to see each price, how long it lasted, and how much it changed. Your target price
+  appears as a dashed line. The **Price changes** list below groups repeated checks at
+  the same price into one row.
 - Press **Escape** to return from product details or wishlist selection; focus returns
   to the control you used to open that view.
 - Price numbers follow your browser language where possible while retaining the

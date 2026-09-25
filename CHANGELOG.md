@@ -4,6 +4,18 @@ All notable changes to this project are documented here. Versions follow semanti
 
 ## [Unreleased]
 
+## [1.4.7] - 2026-09-25
+
+### Changed
+
+- Price history charts now use a time-scaled step line with rounded price ticks, date labels, low/high/now markers, a target-price reference line, and a hover/touch/keyboard tooltip for each held price.
+- Chart summary shows change since the first retained sample, low/high run dates, and target distance; the recent-samples list is replaced by collapsed newest-first price changes with per-change deltas.
+
+### Fixed
+
+- Development dependency `js-yaml` is pinned to 3.15.2 to resolve GHSA-2883-xcg3-v3hh (not shipped in the extension).
+- A storage compaction test no longer fails once its fixed fixture date ages past the 30-day retention window.
+
 ## [1.4.6] - 2026-09-05
 
 ### Fixed

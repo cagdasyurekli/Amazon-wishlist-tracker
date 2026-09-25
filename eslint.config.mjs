@@ -40,6 +40,7 @@ export default [
         queueMicrotask: readonly,
         requestAnimationFrame: readonly,
         cancelAnimationFrame: readonly,
+        ResizeObserver: readonly,
         setTimeout: readonly,
         clearTimeout: readonly,
         setInterval: readonly,
