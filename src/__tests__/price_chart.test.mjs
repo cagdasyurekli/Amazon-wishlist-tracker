@@ -69,6 +69,9 @@ test('niceTicks produces round, covering values', () => {
   const flat = niceTicks(10, 10, 4);
   assert.ok(flat[0] < 10 && flat[flat.length - 1] > 10, 'flat series still gets a visible range');
   assert.deepEqual(niceTicks(NaN, 1), []);
+  assert.ok(niceTicks(0.99, 0.99, 4).every((tick) => tick >= 0), 'flat cheap item gets no negative tick');
+  assert.deepEqual(niceTicks(1000, 1001, 4, 1), [1000, 1001], 'yen ticks stay on whole units');
+  assert.ok(niceTicks(0, 5, 4)[0] === 0);
 });
 
 test('timeTicks spreads labels evenly and handles single-point spans', () => {
@@ -82,8 +85,10 @@ test('formatDuration and timeLabelStyle pick readable units', () => {
   assert.equal(formatDuration(3 * HOUR), '3h');
   assert.equal(formatDuration(50 * HOUR), '2d');
   assert.equal(timeLabelStyle(HOUR), 'time');
-  assert.equal(timeLabelStyle(10 * 24 * HOUR), 'day');
-  assert.equal(timeLabelStyle(400 * 24 * HOUR), 'month');
+  assert.equal(timeLabelStyle(60 * HOUR, 15 * HOUR), 'time', '2.5 days over 5 ticks would repeat day labels');
+  assert.equal(timeLabelStyle(10 * 24 * HOUR, 60 * HOUR), 'day');
+  assert.equal(timeLabelStyle(400 * 24 * HOUR, 100 * 24 * HOUR), 'month');
+  assert.equal(timeLabelStyle(200 * 24 * HOUR, 50 * 24 * HOUR), 'day');
 });
 
 test('getTrackingBaseline prefers the durable start price, else the earliest retained sample', async () => {

@@ -19,6 +19,7 @@ All notable changes to this project are documented here. Versions follow semanti
 - Yen prices no longer show `.00`; recognized currencies use their own minor units.
 - Editing a target updates the reached state and an open chart immediately.
 - Popup says "View Your 1 Item" instead of "View All 1 Items".
+- Charts repaint after being hidden (target edits and theme changes no longer leave a stale image), use time labels when day labels would repeat, never show negative or duplicate price ticks, and respond to a tap on touch screens.
 - Development dependency `js-yaml` is pinned to 3.15.2 to resolve GHSA-2883-xcg3-v3hh (not shipped in the extension).
 - A storage compaction test no longer fails once its fixed fixture date ages past the 30-day retention window.
 

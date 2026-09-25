@@ -1,4 +1,4 @@
-import { getTrackedItems, getStorageData, formatPrice, StorageKeys, StorageArea } from '../utils/storage.js';
+import { getTrackedItems, getStorageData, formatPrice, currencyFractionDigits, StorageKeys, StorageArea } from '../utils/storage.js';
 import { extractWishlistWithVisibleFallback } from './wishlist_extraction.js';
 import {
   getAmazonAsin,
@@ -1364,7 +1364,9 @@ function renderChartMeta(container, dataPoints, item) {
     appendChip(container, `High ${formatPrice(summary.high.price, currency)} · ${highWhen}`);
   }
   if (Number.isFinite(item.targetPrice) && item.targetPrice > 0) {
-    const gap = summary.latest.price - item.targetPrice;
+    // Match the card label, which compares the item's current price.
+    const currentPrice = Number.isFinite(item.currentPrice) ? item.currentPrice : summary.latest.price;
+    const gap = currentPrice - item.targetPrice;
     appendChip(
       container,
       gap <= 0
@@ -1438,7 +1440,8 @@ function renderDetailsHistory(container, dataPoints, currency) {
   if (segments.length > MAX_DETAIL_ROWS) {
     const more = document.createElement('p');
     more.className = 'details-history-intro';
-    more.textContent = `${segments.length - MAX_DETAIL_ROWS} older price periods are stored but not listed. Export a backup from Settings for the complete data.`;
+    const hiddenCount = segments.length - MAX_DETAIL_ROWS;
+    more.textContent = `${hiddenCount} older price period${hiddenCount === 1 ? ' is' : 's are'} stored but not listed. Export a backup from Settings for the complete data.`;
     container.appendChild(more);
   }
 }
@@ -1532,10 +1535,12 @@ function setupPriceChart(canvas, tooltip, dataPoints, item) {
   const startTime = points[0].timestamp;
   const endTime = points[points.length - 1].timestamp;
   const span = endTime - startTime;
-  const labelStyle = timeLabelStyle(span);
+  const priceStep = 10 ** -currencyFractionDigits(currency);
 
   let activeSegment = null;
   let layout = null;
+  // Set when a draw was skipped because the chart was hidden; the next visible resize repaints.
+  let needsRedraw = true;
 
   canvas.tabIndex = 0;
   canvas.setAttribute('role', 'img');
@@ -1547,10 +1552,14 @@ function setupPriceChart(canvas, tooltip, dataPoints, item) {
   ].join(' '));
 
   function draw() {
-    const rect = canvas.getBoundingClientRect();
-    const width = Math.floor(rect.width);
-    const height = Math.floor(rect.height);
-    if (width < 40 || height < 40) return;
+    // clientWidth excludes the CSS border, so the bitmap maps 1:1 onto the drawn area.
+    const width = canvas.clientWidth;
+    const height = canvas.clientHeight;
+    if (width < 40 || height < 40) {
+      needsRedraw = true;
+      return;
+    }
+    needsRedraw = false;
     const dpr = window.devicePixelRatio || 1;
     canvas.width = width * dpr;
     canvas.height = height * dpr;
@@ -1563,7 +1572,7 @@ function setupPriceChart(canvas, tooltip, dataPoints, item) {
     // Only pull the target into view when it would not flatten the actual price movement.
     const targetInView = target !== null && target >= summary.low.price * 0.5 && target <= summary.high.price * 1.5;
     const domainPrices = targetInView ? [summary.low.price, summary.high.price, target] : [summary.low.price, summary.high.price];
-    const yTicks = niceTicks(Math.min(...domainPrices), Math.max(...domainPrices), 4);
+    const yTicks = niceTicks(Math.min(...domainPrices), Math.max(...domainPrices), 4, priceStep);
     const yMin = yTicks[0];
     const yMax = yTicks[yTicks.length - 1];
 
@@ -1600,6 +1609,7 @@ function setupPriceChart(canvas, tooltip, dataPoints, item) {
     ctx.textBaseline = 'alphabetic';
     const tickCount = Math.max(2, Math.min(5, Math.floor(plotWidth / 110)));
     const xTicks = timeTicks(startTime, endTime, tickCount);
+    const labelStyle = timeLabelStyle(span, xTicks.length > 1 ? xTicks[1] - xTicks[0] : span);
     xTicks.forEach((timestamp, index) => {
       const x = xOf(timestamp);
       ctx.textAlign = xTicks.length === 1 ? 'center' : index === 0 ? 'left' : index === xTicks.length - 1 ? 'right' : 'center';
@@ -1687,7 +1697,8 @@ function setupPriceChart(canvas, tooltip, dataPoints, item) {
     }
     const latestIsExtreme = hasRange && (summary.latest === summary.low || summary.latest === summary.high);
     if (!latestIsExtreme) {
-      drawMarker(summary.latest, colors.line, `Now ${formatPrice(summary.latest.price, currency)}`, true);
+      const latestInLowerHalf = yOf(summary.latest.price) > top + plotHeight / 2;
+      drawMarker(summary.latest, colors.line, `Now ${formatPrice(summary.latest.price, currency)}`, latestInLowerHalf);
     }
 
     // Hover / keyboard focus crosshair.
@@ -1711,10 +1722,12 @@ function setupPriceChart(canvas, tooltip, dataPoints, item) {
     }
   }
 
-  function showTooltip(segmentIndex) {
+  function showTooltip(segmentIndex, announce = false) {
     activeSegment = segmentIndex;
     draw();
     if (!tooltip || !layout) return;
+    // Screen readers hear keyboard steps; pointer hovers would otherwise announce on every move.
+    tooltip.setAttribute('aria-live', announce ? 'polite' : 'off');
     const segment = segments[segmentIndex];
     const previous = segments[segmentIndex - 1];
     const isCurrent = segmentIndex === segments.length - 1;
@@ -1745,8 +1758,8 @@ function setupPriceChart(canvas, tooltip, dataPoints, item) {
     const anchorY = layout.yOf(segment.price);
     const tipWidth = tooltip.offsetWidth;
     const tipHeight = tooltip.offsetHeight;
-    const x = Math.min(Math.max(anchorX - tipWidth / 2, 4), layout.width - tipWidth - 4);
-    const y = anchorY - tipHeight - 12 >= 0 ? anchorY - tipHeight - 12 : anchorY + 12;
+    const x = canvas.clientLeft + Math.min(Math.max(anchorX - tipWidth / 2, 4), layout.width - tipWidth - 4);
+    const y = canvas.clientTop + (anchorY - tipHeight - 12 >= 0 ? anchorY - tipHeight - 12 : anchorY + 12);
     tooltip.style.transform = `translate(${Math.round(x)}px, ${Math.round(y)}px)`;
   }
 
@@ -1758,10 +1771,10 @@ function setupPriceChart(canvas, tooltip, dataPoints, item) {
   }
 
   let pendingFrame = 0;
-  canvas.addEventListener('pointermove', (event) => {
+  const trackPointer = (event) => {
     if (!layout) return;
     const rect = canvas.getBoundingClientRect();
-    const x = event.clientX - rect.left;
+    const x = event.clientX - rect.left - canvas.clientLeft;
     cancelAnimationFrame(pendingFrame);
     pendingFrame = requestAnimationFrame(() => {
       const ratio = layout.plotWidth > 0 ? (x - layout.left) / layout.plotWidth : 0;
@@ -1769,10 +1782,14 @@ function setupPriceChart(canvas, tooltip, dataPoints, item) {
       const index = activePointIndex(segmentStarts, timestamp);
       if (index !== activeSegment) showTooltip(index);
     });
-  });
-  canvas.addEventListener('pointerleave', () => {
+  };
+  canvas.addEventListener('pointermove', trackPointer);
+  // A tap produces no pointermove, so show the tooltip on press as well.
+  canvas.addEventListener('pointerdown', trackPointer);
+  canvas.addEventListener('pointerleave', (event) => {
     cancelAnimationFrame(pendingFrame);
-    hideTooltip();
+    // Touch fires pointerleave right after lifting; keep the tapped tooltip until the chart loses focus.
+    if (event.pointerType !== 'touch') hideTooltip();
   });
   canvas.addEventListener('blur', hideTooltip);
   canvas.addEventListener('keydown', (event) => {
@@ -1785,14 +1802,15 @@ function setupPriceChart(canvas, tooltip, dataPoints, item) {
     const fallback = event.key === 'ArrowLeft' ? segments.length : -1;
     const current = activeSegment ?? fallback;
     const next = Math.min(Math.max(current + (event.key === 'ArrowLeft' ? -1 : 1), 0), segments.length - 1);
-    showTooltip(next);
+    showTooltip(next, true);
   });
 
   // Charts first render while their card is expanding and must also follow window resizes.
   let lastWidth = 0;
   new ResizeObserver(([entry]) => {
     const nextWidth = Math.floor(entry.contentRect.width);
-    if (nextWidth === lastWidth || nextWidth === 0) return;
+    if (nextWidth === 0) return;
+    if (nextWidth === lastWidth && !needsRedraw) return;
     lastWidth = nextWidth;
     if (activeSegment !== null) showTooltip(activeSegment);
     else draw();

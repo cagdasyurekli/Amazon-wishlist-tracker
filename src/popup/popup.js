@@ -5,7 +5,7 @@ import {
   normalizeStoredAmazonProductUrl,
   parseCanonicalAmazonUrl
 } from '../utils/amazon.js';
-import { getTrackingBaseline } from '../utils/history.mjs';
+import { getTrackingBaseline, getTrackingChange } from '../utils/history.mjs';
 
 // The popup is a quick-glance surface: current-tab action + a few recent
 // items. The full list lives in the dashboard — rendering hundreds of cards
@@ -144,24 +144,16 @@ document.addEventListener('DOMContentLoaded', async () => {
 
       // Change since tracking started; a drop is good news, so down = green.
       const changeEl = clone.querySelector('.price-change');
-      const baseline = item._trackingBaseline?.price;
-      if (Number.isFinite(baseline) && Number.isFinite(item.currentPrice) && baseline > 0) {
-        const pct = ((item.currentPrice - baseline) / baseline) * 100;
-        if (Math.abs(pct) >= 0.5) {
-          changeEl.hidden = false;
-          changeEl.textContent = `${pct < 0 ? '▼' : '▲'} ${Math.abs(pct).toFixed(0)}%`;
-          changeEl.className = `price-change ${pct < 0 ? 'change-down' : 'change-up'}`;
-          const baselineTimestamp = item._trackingBaseline?.timestamp;
-          if (item._trackingBaseline?.exact) {
-            changeEl.title = Number.isFinite(baselineTimestamp)
-              ? `Since tracking started on ${new Date(baselineTimestamp).toLocaleDateString()}`
-              : 'Since tracking started';
-          } else {
-            changeEl.title = Number.isFinite(baselineTimestamp)
-              ? `Since earliest retained sample on ${new Date(baselineTimestamp).toLocaleDateString()}`
-              : 'Since earliest retained sample';
-          }
-        }
+      const trackingChange = getTrackingChange(item, historyObj[item.id]);
+      if (trackingChange) {
+        const { percent, baseline } = trackingChange;
+        changeEl.hidden = false;
+        changeEl.textContent = `${percent < 0 ? '▼' : '▲'} ${Math.abs(percent).toFixed(0)}%`;
+        changeEl.className = `price-change ${percent < 0 ? 'change-down' : 'change-up'}`;
+        const since = Number.isFinite(baseline.timestamp) ? ` on ${new Date(baseline.timestamp).toLocaleDateString()}` : '';
+        changeEl.title = baseline.exact
+          ? `Since tracking started${since}`
+          : `Since earliest retained sample${since}`;
       }
 
       recentList.appendChild(clone);

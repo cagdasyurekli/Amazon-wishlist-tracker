@@ -70,18 +70,23 @@ export function activePointIndex(points, timestamp) {
   return lo;
 }
 
-// Round-number axis ticks (1, 2, 2.5, 5 × 10^n) covering [min, max].
-export function niceTicks(min, max, maxTicks = 4) {
+// Round-number axis ticks (1, 2, 2.5, 5 × 10^n) covering [min, max]. `minStep` keeps ticks
+// on representable values (1 for yen, so two ticks never format to the same label), and
+// non-negative data never gets a negative tick.
+export function niceTicks(min, max, maxTicks = 4, minStep = 0) {
   if (!Number.isFinite(min) || !Number.isFinite(max)) return [];
+  const nonNegative = min >= 0;
   if (min === max) {
-    const pad = Math.max(Math.abs(min) * 0.05, 1);
+    const pad = Math.max(Math.abs(min) * 0.05, minStep, 0.01);
     min -= pad;
     max += pad;
   }
   const rawStep = (max - min) / Math.max(1, maxTicks - 1);
   const magnitude = 10 ** Math.floor(Math.log10(rawStep));
-  const step = [1, 2, 2.5, 5, 10].map((factor) => factor * magnitude).find((candidate) => candidate >= rawStep);
-  const start = Math.floor(min / step) * step;
+  const niceStep = [1, 2, 2.5, 5, 10].map((factor) => factor * magnitude).find((candidate) => candidate >= rawStep);
+  const step = Math.max(niceStep, minStep);
+  let start = Math.floor(min / step) * step;
+  if (nonNegative) start = Math.max(0, start);
   const end = Math.ceil(max / step) * step;
   const ticks = [];
   for (let value = start; value <= end + step / 2; value += step) {
@@ -104,9 +109,10 @@ export function formatDuration(ms) {
   return `${Math.round(ms / DAY_MS)}d`;
 }
 
-// Picks a date label granularity that stays distinct across the visible span.
-export function timeLabelStyle(spanMs) {
-  if (spanMs < 2 * DAY_MS) return 'time';
-  if (spanMs < 300 * DAY_MS) return 'day';
+// Picks a date label granularity from the gap between adjacent ticks, so neighbouring
+// labels never repeat (a 2.5-day span with 5 ticks needs times, not days).
+export function timeLabelStyle(spanMs, tickStepMs = spanMs) {
+  if (tickStepMs < DAY_MS) return 'time';
+  if (tickStepMs < 30 * DAY_MS || spanMs < 300 * DAY_MS) return 'day';
   return 'month';
 }

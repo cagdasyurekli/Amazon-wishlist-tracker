@@ -85,17 +85,37 @@ export async function removeStorageData(key, area = StorageArea.SYNC) {
  * @param {string|string[]} [locale] defaults to the browser locale
  * @returns {string}
  */
+const CURRENCY_CODES = {
+  '$': 'USD',
+  '€': 'EUR',
+  '£': 'GBP',
+  '¥': 'JPY',
+  '₺': 'TRY',
+  'TL': 'TRY'
+};
+
+function resolveCurrencyCode(currency) {
+  return CURRENCY_CODES[currency] || (/^[A-Z]{3}$/.test(currency || '') ? currency : null);
+}
+
+/**
+ * Number of decimals formatPrice shows for a stored currency symbol (0 for yen).
+ * @param {string} currency
+ * @returns {number}
+ */
+export function currencyFractionDigits(currency) {
+  const currencyCode = resolveCurrencyCode(currency);
+  if (!currencyCode) return 2;
+  try {
+    return new Intl.NumberFormat(undefined, { style: 'currency', currency: currencyCode }).resolvedOptions().maximumFractionDigits;
+  } catch (_error) {
+    return 2;
+  }
+}
+
 export function formatPrice(price, currency, locale) {
   if (!Number.isFinite(price)) return 'N/A';
-  const currencyCodes = {
-    '$': 'USD',
-    '€': 'EUR',
-    '£': 'GBP',
-    '¥': 'JPY',
-    '₺': 'TRY',
-    'TL': 'TRY'
-  };
-  const currencyCode = currencyCodes[currency] || (/^[A-Z]{3}$/.test(currency || '') ? currency : null);
+  const currencyCode = resolveCurrencyCode(currency);
   try {
     if (currencyCode) {
       // Intl supplies each currency's minor units (2 for EUR/USD, 0 for JPY).
