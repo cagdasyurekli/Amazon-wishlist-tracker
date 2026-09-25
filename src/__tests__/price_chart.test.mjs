@@ -85,3 +85,27 @@ test('formatDuration and timeLabelStyle pick readable units', () => {
   assert.equal(timeLabelStyle(10 * 24 * HOUR), 'day');
   assert.equal(timeLabelStyle(400 * 24 * HOUR), 'month');
 });
+
+test('getTrackingBaseline prefers the durable start price, else the earliest retained sample', async () => {
+  const { getTrackingBaseline } = await import('../utils/history.mjs');
+  assert.deepEqual(
+    getTrackingBaseline({ trackingStartPrice: 50, trackingStartedAt: 7, trackingBaselineExact: true }, []),
+    { price: 50, timestamp: 7, exact: true }
+  );
+  assert.deepEqual(
+    getTrackingBaseline({}, [{ price: 9, timestamp: 20 }, { price: 12, timestamp: 10 }, { price: null, timestamp: 1 }]),
+    { price: 12, timestamp: 10, exact: false }
+  );
+  assert.equal(getTrackingBaseline({}, []), null);
+});
+
+test('getTrackingChange signs the change and hides moves under 0.5%', async () => {
+  const { getTrackingChange } = await import('../utils/history.mjs');
+  const drop = getTrackingChange({ currentPrice: 278, trackingStartPrice: 399.99 }, []);
+  assert.ok(Math.abs(drop.percent - -30.4983) < 0.001);
+  assert.ok(Math.abs(drop.amount - -121.99) < 1e-9);
+  assert.equal(getTrackingChange({ currentPrice: 100.4, trackingStartPrice: 100 }, []), null);
+  assert.ok(getTrackingChange({ currentPrice: 110, trackingStartPrice: 100 }, []).percent > 0);
+  assert.equal(getTrackingChange({ currentPrice: 5, trackingStartPrice: 0 }, []), null);
+  assert.equal(getTrackingChange({ trackingStartPrice: 10 }, []), null);
+});

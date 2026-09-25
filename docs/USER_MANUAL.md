@@ -161,8 +161,12 @@ popup.
 ### Review one product
 
 - Select the product title to open its Amazon page.
-- Select **View all entries** for current price, stock, target, wishlist discount
-  information, and timestamped history.
+- Select **Full price history** for current price, stock, target, wishlist discount
+  information, and every retained price period with its dates and change. Products
+  without history show **Product details** instead.
+- The badge under each price (for example **▼ 30% · $121.99**) is the change since
+  tracking started; hover it for the start date and price. A met target shows
+  **✓ Target … reached**.
 - Select **History** for one product or **Expand Visible Histories** for all currently
   rendered products.
 - The history chart is a step line over real time: a flat stretch means the price held
@@ -421,7 +425,7 @@ an unavailable price, a sleeping browser, or active backoff can delay that sampl
 | Open all products | Popup | **↗** (**Open dashboard**) |
 | Set a target | Dashboard product card | **Set target** → price → **Save** |
 | Prioritize a product | Dashboard product card | **Fast checks** |
-| Inspect history | Dashboard product card | **History** or **View all entries** |
+| Inspect history | Dashboard product card | **History** or **Full price history** |
 | Remove a product | Dashboard product card | **Remove** → **Confirm remove** |
 | Export data | Extension Settings | **Export Data (JSON)** |
 | Clear history | Extension Settings | **Clear Price History** → **Confirm Clear History** |

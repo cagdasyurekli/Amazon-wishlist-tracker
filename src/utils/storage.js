@@ -98,12 +98,11 @@ export function formatPrice(price, currency, locale) {
   const currencyCode = currencyCodes[currency] || (/^[A-Z]{3}$/.test(currency || '') ? currency : null);
   try {
     if (currencyCode) {
+      // Intl supplies each currency's minor units (2 for EUR/USD, 0 for JPY).
       return new Intl.NumberFormat(locale, {
         style: 'currency',
         currency: currencyCode,
-        currencyDisplay: 'narrowSymbol',
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2
+        currencyDisplay: 'narrowSymbol'
       }).format(price);
     }
     const formatted = new Intl.NumberFormat(locale, {

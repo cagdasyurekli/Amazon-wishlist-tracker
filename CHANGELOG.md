@@ -10,9 +10,15 @@ All notable changes to this project are documented here. Versions follow semanti
 
 - Price history charts now use a time-scaled step line with rounded price ticks, date labels, low/high/now markers, a target-price reference line, and a hover/touch/keyboard tooltip for each held price.
 - Chart summary shows change since the first retained sample, low/high run dates, and target distance; the recent-samples list is replaced by collapsed newest-first price changes with per-change deltas.
+- Dashboard product cards show the since-tracking change badge used by the popup and highlight a reached target.
+- "View all entries" is now **Full price history** and lists grouped price periods (bounded to 500) instead of every raw sample.
 
 ### Fixed
 
+- Dashboard toolbar no longer leaves a large empty gap under Search at narrow widths; Sort and Filter share a row.
+- Yen prices no longer show `.00`; recognized currencies use their own minor units.
+- Editing a target updates the reached state and an open chart immediately.
+- Popup says "View Your 1 Item" instead of "View All 1 Items".
 - Development dependency `js-yaml` is pinned to 3.15.2 to resolve GHSA-2883-xcg3-v3hh (not shipped in the extension).
 - A storage compaction test no longer fails once its fixed fixture date ages past the 30-day retention window.
 

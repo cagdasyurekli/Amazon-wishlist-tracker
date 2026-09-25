@@ -266,6 +266,10 @@ describe('Chrome extension E2E', () => {
           url: 'https://www.amazon.nl/dp/B000000001',
           currentPrice: 10.97,
           originalPrice: 10.97,
+          targetPrice: 11,
+          trackingStartPrice: 12.19,
+          trackingStartedAt: Date.UTC(2026, 5, 1, 12),
+          trackingBaselineExact: true,
           currency: '€',
           inStock: true,
           addedAt: Date.now() - 1000
@@ -296,6 +300,15 @@ describe('Chrome extension E2E', () => {
     await expect(page.$$eval('.item-card[data-id="B012345678"] .chart-sample', (rows) => rows.map(row => row.textContent))).resolves.toHaveLength(1);
     await expect(page.$eval('.item-card[data-id="B012345678"] .chart-sample', (node) => node.textContent)).resolves.toContain('2 checks');
     await expect(page.$eval('.item-card[data-id="B012345678"] .chart-samples', (node) => node.textContent)).resolves.toContain('€10.99');
+
+    // Cards reuse the popup's since-tracking badge and flag a met target.
+    await expect(page.$eval('.item-card[data-id="B000000001"] .tracking-change', (node) => ({
+      hidden: node.hidden,
+      text: node.textContent,
+      down: node.classList.contains('change-down')
+    }))).resolves.toEqual({ hidden: false, text: '▼ 10% · €1.22', down: true });
+    await expect(page.$eval('.item-card[data-id="B000000001"] .target-price', (node) => node.classList.contains('target-reached'))).resolves.toBe(true);
+    await expect(page.$eval('.item-card[data-id="B012345678"] .tracking-change', (node) => node.hidden)).resolves.toBe(true);
 
     await page.type('#item-search-input', 'siddharth');
     await page.waitForFunction(() => document.querySelector('#main-title')?.textContent?.trim() === 'Tracked Items (1 of 3)');
@@ -546,7 +559,9 @@ describe('Chrome extension E2E', () => {
     }));
     expect(initialLayout.documentFitsWidth).toBe(true);
     expect(initialLayout.canScrollPage).toBe(true);
-    expect(initialLayout.listTop).toBeGreaterThan(initialLayout.viewportHeight);
+    // The compact two-column toolbar keeps the first product on screen even at 200% zoom
+    // (previously a column-direction flex-basis pushed the list below the fold).
+    expect(initialLayout.listTop).toBeLessThan(initialLayout.viewportHeight);
 
     const reachable = await page.evaluate(() => {
       const card = document.querySelector('.item-card');

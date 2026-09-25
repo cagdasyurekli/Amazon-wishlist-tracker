@@ -28,6 +28,33 @@ export function applyMissingTrackingBaselines(items, history) {
   return { items: updatedItems, updatedCount };
 }
 
+// Price the tracking comparison is measured against: the durable tracking-start price,
+// or the earliest retained sample for legacy data without one.
+export function getTrackingBaseline(item, historyPoints) {
+  if (Number.isFinite(item?.trackingStartPrice)) {
+    return {
+      price: item.trackingStartPrice,
+      timestamp: Number.isFinite(item.trackingStartedAt) ? item.trackingStartedAt : item.addedAt,
+      exact: item.trackingBaselineExact === true
+    };
+  }
+  const firstRetained = (Array.isArray(historyPoints) ? historyPoints : [])
+    .filter((point) => Number.isFinite(point?.price) && Number.isFinite(point?.timestamp))
+    .reduce((earliest, point) => !earliest || point.timestamp < earliest.timestamp ? point : earliest, null);
+  return firstRetained
+    ? { price: firstRetained.price, timestamp: firstRetained.timestamp, exact: false }
+    : null;
+}
+
+// Signed percent change from the tracking baseline, or null below the 0.5% display threshold.
+export function getTrackingChange(item, historyPoints) {
+  const baseline = getTrackingBaseline(item, historyPoints);
+  if (!baseline || !(baseline.price > 0) || !Number.isFinite(item?.currentPrice)) return null;
+  const percent = ((item.currentPrice - baseline.price) / baseline.price) * 100;
+  if (Math.abs(percent) < 0.5) return null;
+  return { percent, amount: item.currentPrice - baseline.price, baseline };
+}
+
 function pointKey(point) {
   return `${point.timestamp}:${point.price}`;
 }

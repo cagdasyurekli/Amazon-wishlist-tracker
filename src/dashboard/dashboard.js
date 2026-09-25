@@ -19,6 +19,7 @@ import {
   timeTicks,
   validHistory
 } from '../utils/price_chart.mjs';
+import { getTrackingChange } from '../utils/history.mjs';
 
 document.addEventListener('DOMContentLoaded', async () => {
   const itemList = document.getElementById('item-list');
@@ -1034,6 +1035,20 @@ document.addEventListener('DOMContentLoaded', async () => {
       
       clone.querySelector('.item-price').textContent = formatPrice(item.currentPrice, item.currency);
 
+      // Same baseline and 0.5% threshold as the popup highlights; a drop is good news, so down = green.
+      const trackingChangeEl = clone.querySelector('.tracking-change');
+      const trackingChange = getTrackingChange(item, history[item.id]);
+      if (trackingChangeEl && trackingChange) {
+        const { percent, amount, baseline } = trackingChange;
+        trackingChangeEl.hidden = false;
+        trackingChangeEl.className = `tracking-change ${percent < 0 ? 'change-down' : 'change-up'}`;
+        trackingChangeEl.textContent = `${percent < 0 ? '▼' : '▲'} ${Math.abs(percent).toFixed(0)}% · ${formatPrice(Math.abs(amount), item.currency)}`;
+        const since = Number.isFinite(baseline.timestamp) ? ` on ${new Date(baseline.timestamp).toLocaleDateString()}` : '';
+        trackingChangeEl.title = baseline.exact
+          ? `Since tracking started${since} at ${formatPrice(baseline.price, item.currency)}`
+          : `Since earliest retained sample${since} at ${formatPrice(baseline.price, item.currency)}`;
+      }
+
       const discountInfoEl = clone.querySelector('.discount-info');
       const originalPriceEl = clone.querySelector('.original-price');
       const discountBadgeEl = clone.querySelector('.discount-badge');
@@ -1046,7 +1061,17 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
 
       const targetEl = clone.querySelector('.target-price');
-      targetEl.textContent = item.targetPrice ? `Target: ${formatPrice(item.targetPrice, item.currency)}` : 'No target set';
+      const renderTargetLabel = () => {
+        const hasTarget = Number.isFinite(item.targetPrice) && item.targetPrice > 0;
+        const targetReached = hasTarget && Number.isFinite(item.currentPrice) && item.currentPrice <= item.targetPrice;
+        targetEl.classList.toggle('target-reached', targetReached);
+        targetEl.textContent = !hasTarget
+          ? 'No target set'
+          : targetReached
+            ? `✓ Target ${formatPrice(item.targetPrice, item.currency)} reached`
+            : `Target: ${formatPrice(item.targetPrice, item.currency)}`;
+      };
+      renderTargetLabel();
 
       const lastCheckedEl = clone.querySelector('.last-checked');
       if (lastCheckedEl) {
@@ -1126,11 +1151,18 @@ document.addEventListener('DOMContentLoaded', async () => {
 
       const detailsBtn = clone.querySelector('.details-btn');
       if (detailsBtn) {
+        if (itemHistory.length === 0) detailsBtn.textContent = 'Product details';
         detailsBtn.addEventListener('click', () => {
           document.getElementById('details-product-name').textContent = item.title;
           document.getElementById('details-current-price').textContent = formatPrice(item.currentPrice, item.currency);
           document.getElementById('details-stock-status').textContent = item.inStock ? 'In Stock' : 'Out of Stock';
-          document.getElementById('details-target-price').textContent = item.targetPrice ? formatPrice(item.targetPrice, item.currency) : 'No target set';
+          const detailsTarget = document.getElementById('details-target-price');
+          const detailsTargetReached = Number.isFinite(item.targetPrice) && item.targetPrice > 0 &&
+            Number.isFinite(item.currentPrice) && item.currentPrice <= item.targetPrice;
+          detailsTarget.textContent = item.targetPrice
+            ? `${formatPrice(item.targetPrice, item.currency)}${detailsTargetReached ? ' ✓ reached' : ''}`
+            : 'No target set';
+          detailsTarget.classList.toggle('target-reached', detailsTargetReached);
           const detailsDiscount = document.getElementById('details-discount-info');
           if (detailsDiscount) {
             const priceDropSummary = formatPriceDropSummary(item);
@@ -1142,34 +1174,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             }
           }
           
-          const historyList = document.getElementById('details-history-list');
-          historyList.replaceChildren();
-          if (itemHistory.length === 0) {
-            const emptyHistory = document.createElement('em');
-            emptyHistory.textContent = 'No price history recorded yet.';
-            historyList.appendChild(emptyHistory);
-          } else {
-            // Reverse so newest is at the top
-            const reversedHistory = [...itemHistory].reverse();
-            reversedHistory.forEach(entry => {
-              const div = document.createElement('div');
-              div.className = 'history-row';
-              
-              const dateObj = new Date(entry.timestamp);
-              const dateStr = dateObj.toLocaleDateString() + ' ' + dateObj.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
-              
-              const dateSpan = document.createElement('span');
-              dateSpan.textContent = dateStr;
-              
-              const priceSpan = document.createElement('span');
-              priceSpan.style.fontWeight = 'bold';
-              priceSpan.textContent = formatPrice(entry.price, item.currency);
-              
-              div.appendChild(dateSpan);
-              div.appendChild(priceSpan);
-              historyList.appendChild(div);
-            });
-          }
+          renderDetailsHistory(document.getElementById('details-history-list'), itemHistory, item.currency);
           
           openSecondaryView(detailsView, detailsTitle, detailsBtn);
         });
@@ -1216,7 +1221,11 @@ document.addEventListener('DOMContentLoaded', async () => {
         try {
           await updateTrackedItem({ id: item.id, targetPrice: parsed });
           item.targetPrice = parsed;
-          targetEl.textContent = parsed ? `Target: ${formatPrice(parsed, item.currency)}` : 'No target set';
+          renderTargetLabel();
+          if (chartPrepared) {
+            renderChartMeta(chartMeta, itemHistory, item);
+            chartRedrawers.get(canvas)?.();
+          }
           closeTargetEditor();
           showStatus(parsed ? 'Target price updated.' : 'Target price cleared.', 'success');
           editBtn.focus();
@@ -1354,7 +1363,7 @@ function renderChartMeta(container, dataPoints, item) {
     appendChip(container, `Low ${formatPrice(summary.low.price, currency)} · ${lowWhen}`);
     appendChip(container, `High ${formatPrice(summary.high.price, currency)} · ${highWhen}`);
   }
-  if (Number.isFinite(item.targetPrice)) {
+  if (Number.isFinite(item.targetPrice) && item.targetPrice > 0) {
     const gap = summary.latest.price - item.targetPrice;
     appendChip(
       container,
@@ -1368,6 +1377,70 @@ function renderChartMeta(container, dataPoints, item) {
     ? 'no price changes'
     : `${summary.changeCount} price change${summary.changeCount === 1 ? '' : 's'}`;
   appendChip(container, `${summary.sampleCount} stored sample${summary.sampleCount === 1 ? '' : 's'} · ${changeText}`);
+}
+
+const MAX_DETAIL_ROWS = 500;
+
+// Full history as held-price runs, newest first. Raw samples repeat the same price on
+// every check, so listing them individually buries the actual changes (and can mean
+// thousands of DOM rows).
+function renderDetailsHistory(container, dataPoints, currency) {
+  container.replaceChildren();
+  const segments = priceSegments(dataPoints);
+  if (segments.length === 0) {
+    const empty = document.createElement('em');
+    empty.textContent = 'No price history recorded yet.';
+    container.appendChild(empty);
+    return;
+  }
+
+  const sampleCount = segments.reduce((sum, segment) => sum + segment.samples, 0);
+  const intro = document.createElement('p');
+  intro.className = 'details-history-intro';
+  intro.textContent = `${sampleCount} stored sample${sampleCount === 1 ? '' : 's'} grouped into ${segments.length} price period${segments.length === 1 ? '' : 's'}, newest first.`;
+  container.appendChild(intro);
+
+  for (let index = segments.length - 1; index >= Math.max(0, segments.length - MAX_DETAIL_ROWS); index--) {
+    const segment = segments[index];
+    const previous = segments[index - 1];
+    const until = segments[index + 1]?.from ?? null;
+
+    const row = document.createElement('div');
+    row.className = 'history-row';
+
+    const when = document.createElement('span');
+    when.className = 'history-when';
+    const period = until === null
+      ? `Since ${formatChartDateTime(segment.from)}`
+      : `${formatChartDateTime(segment.from)} → ${formatChartDateTime(until)}`;
+    const held = (until ?? segment.to) - segment.from;
+    const detail = document.createElement('small');
+    detail.textContent = `${held > 0 ? `${formatDuration(held)} · ` : ''}${segment.samples} check${segment.samples === 1 ? '' : 's'}`;
+    when.append(period, detail);
+
+    const value = document.createElement('span');
+    value.className = 'chart-sample-value';
+    const price = document.createElement('strong');
+    price.textContent = formatPrice(segment.price, currency);
+    value.appendChild(price);
+    if (previous) {
+      const change = segment.price - previous.price;
+      const delta = document.createElement('span');
+      delta.className = change < 0 ? 'delta-drop' : 'delta-rise';
+      delta.textContent = formatPriceChange(change, currency, previous.price > 0 ? (change / previous.price) * 100 : null);
+      value.appendChild(delta);
+    }
+
+    row.append(when, value);
+    container.appendChild(row);
+  }
+
+  if (segments.length > MAX_DETAIL_ROWS) {
+    const more = document.createElement('p');
+    more.className = 'details-history-intro';
+    more.textContent = `${segments.length - MAX_DETAIL_ROWS} older price periods are stored but not listed. Export a backup from Settings for the complete data.`;
+    container.appendChild(more);
+  }
 }
 
 const MAX_CHANGE_ROWS = 6;
@@ -1426,7 +1499,7 @@ function renderChartSamples(container, dataPoints, currency) {
   if (segments.length > MAX_CHANGE_ROWS) {
     const more = document.createElement('p');
     more.className = 'chart-samples-more';
-    more.textContent = `${segments.length - MAX_CHANGE_ROWS} older change${segments.length - MAX_CHANGE_ROWS === 1 ? '' : 's'} — use “View all entries”.`;
+    more.textContent = `${segments.length - MAX_CHANGE_ROWS} older change${segments.length - MAX_CHANGE_ROWS === 1 ? '' : 's'} — see “Full price history”.`;
     container.appendChild(more);
   }
 }
@@ -1461,16 +1534,6 @@ function setupPriceChart(canvas, tooltip, dataPoints, item) {
   const span = endTime - startTime;
   const labelStyle = timeLabelStyle(span);
 
-  const prices = points.map((point) => point.price);
-  const domainPrices = [...prices];
-  const target = Number.isFinite(item.targetPrice) ? item.targetPrice : null;
-  // Only pull the target into view when it would not flatten the actual price movement.
-  const targetInView = target !== null && target >= summary.low.price * 0.5 && target <= summary.high.price * 1.5;
-  if (targetInView) domainPrices.push(target);
-  const yTicks = niceTicks(Math.min(...domainPrices), Math.max(...domainPrices), 4);
-  const yMin = yTicks[0];
-  const yMax = yTicks[yTicks.length - 1];
-
   let activeSegment = null;
   let layout = null;
 
@@ -1495,6 +1558,14 @@ function setupPriceChart(canvas, tooltip, dataPoints, item) {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, width, height);
     const colors = readChartColors();
+
+    const target = Number.isFinite(item.targetPrice) && item.targetPrice > 0 ? item.targetPrice : null;
+    // Only pull the target into view when it would not flatten the actual price movement.
+    const targetInView = target !== null && target >= summary.low.price * 0.5 && target <= summary.high.price * 1.5;
+    const domainPrices = targetInView ? [summary.low.price, summary.high.price, target] : [summary.low.price, summary.high.price];
+    const yTicks = niceTicks(Math.min(...domainPrices), Math.max(...domainPrices), 4);
+    const yMin = yTicks[0];
+    const yMax = yTicks[yTicks.length - 1];
 
     ctx.font = '11px Inter, system-ui, sans-serif';
     const yLabels = yTicks.map((value) => formatPrice(value, currency));
@@ -1726,6 +1797,9 @@ function setupPriceChart(canvas, tooltip, dataPoints, item) {
     if (activeSegment !== null) showTooltip(activeSegment);
     else draw();
   }).observe(canvas);
+  chartRedrawers.forEach((_, registered) => {
+    if (!registered.isConnected) chartRedrawers.delete(registered);
+  });
   chartRedrawers.set(canvas, draw);
 }
 

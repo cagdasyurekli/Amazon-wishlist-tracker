@@ -161,6 +161,12 @@ describe('locale-aware price formatting', () => {
     assert.equal(api.formatPrice(1299, '₺', 'tr-TR'), expected);
     assert.equal(api.formatPrice(1299, 'TL', 'tr-TR'), expected);
   });
+
+  it('formats yen without minor units and keeps two decimals for dollars', async () => {
+    const { api } = await loadStorage();
+    assert.equal(api.formatPrice(49980, '¥', 'en-US'), '¥49,980');
+    assert.equal(api.formatPrice(5, '$', 'en-US'), '$5.00');
+  });
 });
 
 describe('validated backup replacement', () => {

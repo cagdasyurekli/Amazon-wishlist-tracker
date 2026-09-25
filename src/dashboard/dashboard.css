@@ -217,6 +217,11 @@ body {
 .item-title:hover { text-decoration: underline; }
 .price-container { min-width: 100px; text-align: right; }
 .item-price { color: var(--navy); font-size: 1.18rem; font-weight: 780; }
+.tracking-change { display: inline-block; margin-top: 4px; padding: 2px 8px; border-radius: 999px; font-size: 0.78rem; font-weight: 700; white-space: nowrap; cursor: help; }
+.tracking-change.change-down { background: color-mix(in srgb, var(--success) 14%, transparent); color: var(--success); }
+.tracking-change.change-up { background: color-mix(in srgb, var(--danger) 12%, transparent); color: var(--danger); }
+.target-price.target-reached,
+#details-target-price.target-reached { color: var(--success); font-weight: 700; }
 
 .discount-info {
   margin: 7px 0 10px;
@@ -374,21 +379,30 @@ button:disabled { cursor: wait; opacity: 0.62; }
 .detail-row { display: flex; justify-content: space-between; gap: 16px; padding: 7px 0; border-bottom: 1px solid var(--border); }
 #details-current-price { color: var(--navy); }
 .details-discount { margin-top: 12px; padding: 9px; border-left: 3px solid var(--success); background: var(--signal-soft); color: var(--success); font-size: 0.88rem; font-weight: 700; }
-.details-history-list { display: flex; max-height: 320px; flex-direction: column; gap: 4px; overflow-y: auto; font-size: 0.84rem; }
-.history-row { display: flex; justify-content: space-between; gap: 12px; padding: 6px 0; border-bottom: 1px solid var(--border); }
+.details-history-list { display: flex; max-height: 420px; flex-direction: column; gap: 4px; overflow-y: auto; font-size: 0.84rem; }
+.details-history-intro { margin: 0 0 6px; color: var(--muted); font-size: 0.8rem; }
+.history-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 7px 0; border-bottom: 1px solid var(--border); }
+.history-when { display: flex; flex-direction: column; gap: 2px; }
+.history-when small { color: var(--muted); font-size: 0.76rem; }
 
 :focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
 
 @media (max-width: 760px) {
   .app-header { padding: 12px; }
-  .dashboard-toolbar,
+  /* Two-column grid instead of a flex column: in a column, the search field's
+     260px flex-basis became a 260px height and left a large gap. */
+  .dashboard-toolbar { display: grid; grid-template-columns: 1fr 1fr; align-items: end; }
+  .dashboard-toolbar .search-field,
+  .dashboard-toolbar #toggle-all-charts-btn { grid-column: 1 / -1; }
+  .toolbar-field select { width: 100%; min-width: 0; }
   .wishlist-import-row { flex-direction: column; align-items: stretch; }
   .item-list { padding: 12px; }
   .app-footer { padding: 12px; }
   .target-editor { align-items: stretch; flex-direction: column; }
   .item-header { flex-wrap: wrap; }
   .item-title { min-width: calc(100% - 70px); white-space: normal; }
-  .price-container { width: 100%; text-align: left; }
+  .price-container { display: flex; width: 100%; align-items: center; gap: 8px; text-align: left; }
+  .tracking-change { margin-top: 0; }
   .import-btn { width: 100%; }
 }
 
