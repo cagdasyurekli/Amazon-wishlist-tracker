@@ -153,6 +153,7 @@
         <a class="item-title" target="_blank" rel="noopener noreferrer">Product Title</a>
         <div class="price-container">
           <div class="item-price">$0.00</div>
+          <div class="tracking-change" hidden></div>
         </div>
       </div>
       <div class="discount-info" hidden>
@@ -175,9 +176,12 @@
       </form>
       <div class="chart-container">
         <div class="chart-meta" aria-live="polite"></div>
-        <canvas class="price-chart" aria-hidden="true"></canvas>
+        <div class="chart-plot">
+          <canvas class="price-chart" aria-hidden="true"></canvas>
+          <div class="chart-tooltip" aria-live="off" hidden></div>
+        </div>
         <div class="chart-samples"></div>
-        <button class="details-btn secondary-btn" type="button">View all entries</button>
+        <button class="details-btn secondary-btn" type="button">Full price history</button>
       </div>
       <div class="item-actions">
         <button class="priority-btn" type="button" aria-pressed="false">Fast checks</button>

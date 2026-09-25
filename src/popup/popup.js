@@ -5,27 +5,12 @@ import {
   normalizeStoredAmazonProductUrl,
   parseCanonicalAmazonUrl
 } from '../utils/amazon.js';
+import { getTrackingBaseline, getTrackingChange } from '../utils/history.mjs';
 
 // The popup is a quick-glance surface: current-tab action + a few recent
 // items. The full list lives in the dashboard — rendering hundreds of cards
 // here made the popup unusable.
 const RECENT_ITEMS_COUNT = 3;
-
-function getTrackingBaseline(item, historyPoints) {
-  if (Number.isFinite(item.trackingStartPrice)) {
-    return {
-      price: item.trackingStartPrice,
-      timestamp: Number.isFinite(item.trackingStartedAt) ? item.trackingStartedAt : item.addedAt,
-      exact: item.trackingBaselineExact === true
-    };
-  }
-  const firstRetained = (Array.isArray(historyPoints) ? historyPoints : [])
-    .filter((point) => Number.isFinite(point?.price) && Number.isFinite(point?.timestamp))
-    .sort((a, b) => a.timestamp - b.timestamp)[0];
-  return firstRetained
-    ? { price: firstRetained.price, timestamp: firstRetained.timestamp, exact: false }
-    : null;
-}
 
 document.addEventListener('DOMContentLoaded', async () => {
   const countBadge = document.getElementById('item-count');
@@ -85,9 +70,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     countBadge.textContent = items.length;
     countBadge.setAttribute('aria-label', `${items.length} tracked item${items.length === 1 ? '' : 's'}`);
     emptyState.hidden = items.length !== 0;
-    openDashboardBtn.textContent = items.length > 0
-      ? `View All ${items.length} Items`
-      : 'Open Dashboard';
+    openDashboardBtn.textContent = items.length === 1
+      ? 'View Your 1 Item'
+      : items.length > 1
+        ? `View All ${items.length} Items`
+        : 'Open Dashboard';
 
     recentList.textContent = '';
     recentSection.hidden = items.length === 0;
@@ -157,24 +144,16 @@ document.addEventListener('DOMContentLoaded', async () => {
 
       // Change since tracking started; a drop is good news, so down = green.
       const changeEl = clone.querySelector('.price-change');
-      const baseline = item._trackingBaseline?.price;
-      if (Number.isFinite(baseline) && Number.isFinite(item.currentPrice) && baseline > 0) {
-        const pct = ((item.currentPrice - baseline) / baseline) * 100;
-        if (Math.abs(pct) >= 0.5) {
-          changeEl.hidden = false;
-          changeEl.textContent = `${pct < 0 ? '▼' : '▲'} ${Math.abs(pct).toFixed(0)}%`;
-          changeEl.className = `price-change ${pct < 0 ? 'change-down' : 'change-up'}`;
-          const baselineTimestamp = item._trackingBaseline?.timestamp;
-          if (item._trackingBaseline?.exact) {
-            changeEl.title = Number.isFinite(baselineTimestamp)
-              ? `Since tracking started on ${new Date(baselineTimestamp).toLocaleDateString()}`
-              : 'Since tracking started';
-          } else {
-            changeEl.title = Number.isFinite(baselineTimestamp)
-              ? `Since earliest retained sample on ${new Date(baselineTimestamp).toLocaleDateString()}`
-              : 'Since earliest retained sample';
-          }
-        }
+      const trackingChange = getTrackingChange(item, historyObj[item.id]);
+      if (trackingChange) {
+        const { percent, baseline } = trackingChange;
+        changeEl.hidden = false;
+        changeEl.textContent = `${percent < 0 ? '▼' : '▲'} ${Math.abs(percent).toFixed(0)}%`;
+        changeEl.className = `price-change ${percent < 0 ? 'change-down' : 'change-up'}`;
+        const since = Number.isFinite(baseline.timestamp) ? ` on ${new Date(baseline.timestamp).toLocaleDateString()}` : '';
+        changeEl.title = baseline.exact
+          ? `Since tracking started${since}`
+          : `Since earliest retained sample${since}`;
       }
 
       recentList.appendChild(clone);

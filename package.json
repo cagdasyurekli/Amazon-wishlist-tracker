@@ -1,10 +1,10 @@
 {
   "name": "amazon-wishlist-tracker",
-  "version": "1.4.6",
+  "version": "1.4.7",
   "private": true,
   "description": "Privacy-first Manifest V3 extension for tracking Amazon product and wishlist prices locally.",
   "scripts": {
-    "test": "jest --config jest.unit.config.cjs",
+    "test": "jest --config jest.unit.config.cjs && node --test src/__tests__/price_chart.test.mjs",
     "test:unit": "jest --config jest.unit.config.cjs",
     "test:scraper-contract": "node --test src/__tests__/scraper.contract.test.mjs src/__tests__/wishlist_extraction.contract.mjs",
     "test:security": "node --test src/__tests__/network.security.mjs src/__tests__/backup.security.test.mjs && NODE_OPTIONS=--experimental-vm-modules node --test src/__tests__/background.security.test.mjs src/__tests__/storage.security.test.mjs src/__tests__/wishlist.security.test.mjs && node --test src/__tests__/content.security.e2e.mjs",
@@ -36,7 +36,7 @@
     "puppeteer": "25.8.0"
   },
   "overrides": {
-    "js-yaml": "3.15.1",
+    "js-yaml": "3.15.2",
     "undici": "7.29.0",
     "minimatch@3.1.5": {
       "brace-expansion": "1.1.18"
