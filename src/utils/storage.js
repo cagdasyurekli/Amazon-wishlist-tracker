@@ -135,8 +135,14 @@ export function formatPrice(price, currency, locale) {
   }
 }
 
+// Stored data can be hand-edited or corrupted; every consumer assumes item
+// entries are plain objects, so drop anything else at the read boundary.
+function onlyItemObjects(items) {
+  return items.filter((item) => item !== null && typeof item === 'object' && !Array.isArray(item));
+}
+
 /**
- * Gets all tracked items.
+ * Gets all tracked items (malformed non-object entries are dropped).
  * @returns {Promise<Array>}
  */
 export async function getTrackedItems() {
@@ -154,7 +160,7 @@ export async function getTrackedItems() {
       // idempotent cleanup if Chrome Sync is temporarily unavailable.
       console.warn('Could not remove legacy tracked items from Chrome Sync:', err);
     }
-    return localItems;
+    return onlyItemObjects(localItems);
   }
 
   const legacySyncItems = await getStorageData(StorageKeys.TRACKED_ITEMS, StorageArea.SYNC);
@@ -170,7 +176,7 @@ export async function getTrackedItems() {
       // The verified local copy is safe to use; future reads retry deletion.
       console.warn('Could not remove legacy tracked items from Chrome Sync:', err);
     }
-    return persistedItems;
+    return onlyItemObjects(persistedItems);
   }
 
   return [];

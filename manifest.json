@@ -1,15 +1,14 @@
 {
   "manifest_version": 3,
   "name": "Amazon Wishlist Tracker",
-  "version": "1.4.7",
+  "version": "1.4.8",
   "description": "Private, local-first price and stock tracking for Amazon products and wishlists.",
   "permissions": [
     "storage",
     "unlimitedStorage",
     "alarms",
     "notifications",
-    "offscreen",
-    "tabs"
+    "offscreen"
   ],
   "host_permissions": [
     "https://*.amazon.com/*",

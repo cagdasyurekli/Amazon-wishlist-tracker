@@ -133,6 +133,28 @@ describe('legacy trackedItems privacy migration', () => {
   });
 });
 
+describe('malformed tracked-item records', () => {
+  const good = { id: 'B000000001', title: 'Good' };
+
+  it('drops non-object entries from local storage', async () => {
+    const { api } = await loadStorage({
+      local: { trackedItems: [null, good, 7, 'B000000002', [1, 2], undefined, { id: 'B000000003' }] }
+    });
+
+    assert.deepEqual(
+      Array.from(await api.getTrackedItems()).map((item) => item.id),
+      ['B000000001', 'B000000003']
+    );
+  });
+
+  it('drops non-object entries from legacy Sync data while still verifying the migration', async () => {
+    const { api, areas } = await loadStorage({ sync: { trackedItems: [null, good, 7] } });
+
+    assert.deepEqual(Array.from(await api.getTrackedItems()).map((item) => item.id), ['B000000001']);
+    assert.equal(areas.sync.has('trackedItems'), false);
+  });
+});
+
 describe('locale-aware price formatting', () => {
   it('uses the requested browser locale ordering and separators', async () => {
     const { api } = await loadStorage();

@@ -992,6 +992,98 @@ describe('Chrome extension E2E', () => {
     expect(popup.unnamedButtons).toBe(0);
   }, 30000);
 
+  it('renders the popup despite malformed stored records', async () => {
+    await launchExtension();
+
+    const page = await browser.newPage();
+    const pageErrors = [];
+    page.on('pageerror', (error) => pageErrors.push(error.message));
+    await page.goto(`chrome-extension://${extensionId}/src/popup/popup.html`, {
+      waitUntil: 'domcontentloaded'
+    });
+    await page.evaluate(async () => {
+      const valid = Array.from({ length: 800 }, (_, index) => {
+        const id = `B0${String(index).padStart(8, '0')}`;
+        return {
+          id,
+          title: `Item ${index}`,
+          url: `https://www.amazon.nl/dp/${id}`,
+          currentPrice: 10 + (index % 50),
+          currency: 'EUR',
+          addedAt: Date.now() - index
+        };
+      });
+      await chrome.storage.local.set({
+        trackedItems: [...valid.slice(0, 400), null, ...valid.slice(400)],
+        trackedWishlists: [null, 42, { id: 'WISH123' }]
+      });
+      window.location.reload();
+    });
+
+    await page.waitForFunction(() => document.querySelectorAll('#recent-list li').length === 3);
+    await expect(page.$eval('#open-dashboard-btn', (node) => node.textContent)).resolves.toBe('View All 800 Items');
+    expect(pageErrors).toEqual([]);
+  }, 30000);
+
+  it('renders the dashboard despite malformed tracked wishlist entries', async () => {
+    await launchExtension();
+
+    const page = await browser.newPage();
+    const pageErrors = [];
+    page.on('pageerror', (error) => pageErrors.push(error.message));
+    await page.goto(`chrome-extension://${extensionId}/src/dashboard/dashboard.html`, {
+      waitUntil: 'domcontentloaded'
+    });
+    await page.evaluate(async () => {
+      await chrome.storage.local.set({
+        trackedItems: [{
+          id: 'B000000001',
+          title: 'Valid item',
+          url: 'https://www.amazon.nl/dp/B000000001',
+          currentPrice: 12,
+          currency: 'EUR',
+          addedAt: Date.now()
+        }],
+        trackedWishlists: [null, 42, { id: 'WISH123' }]
+      });
+      window.location.reload();
+    });
+
+    await page.waitForSelector('.item-card');
+    // The tab-context check runs in a chrome.tabs.query callback after startup.
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    expect(pageErrors).toEqual([]);
+  }, 30000);
+
+  it('still shows since-tracking changes when every item has a stored baseline', async () => {
+    await launchExtension();
+
+    const page = await browser.newPage();
+    await page.goto(`chrome-extension://${extensionId}/src/popup/popup.html`, {
+      waitUntil: 'domcontentloaded'
+    });
+    await page.evaluate(async () => {
+      const now = Date.now();
+      await chrome.storage.local.set({
+        trackedItems: [{
+          id: 'B000000002',
+          title: 'Baselined',
+          url: 'https://www.amazon.nl/dp/B000000002',
+          currentPrice: 8,
+          trackingStartPrice: 10,
+          trackingStartedAt: now - 86400000,
+          trackingBaselineExact: true,
+          currency: 'EUR',
+          addedAt: now
+        }]
+      });
+      window.location.reload();
+    });
+
+    await page.waitForSelector('.price-change:not([hidden])');
+    await expect(page.$eval('.price-change', (node) => node.textContent)).resolves.toBe('▼ 20%');
+  }, 30000);
+
   it('copies a legacy target only after an explicit single-currency action', async () => {
     await launchExtension();
 

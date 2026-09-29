@@ -60,11 +60,13 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   async function renderSummary() {
-    const [items, history] = await Promise.all([
-      getTrackedItems(),
-      getStorageData(StorageKeys.PRICE_HISTORY, StorageArea.LOCAL)
-    ]);
-    const historyObj = history || {};
+    const items = await getTrackedItems();
+    // History is only a fallback baseline for items without a stored tracking
+    // start price; skip loading it (potentially large) when none need it.
+    const needsHistory = items.some((item) => !Number.isFinite(item.trackingStartPrice));
+    const historyObj = needsHistory
+      ? await getStorageData(StorageKeys.PRICE_HISTORY, StorageArea.LOCAL) || {}
+      : {};
 
     countBadge.hidden = items.length === 0;
     countBadge.textContent = items.length;
@@ -162,49 +164,55 @@ document.addEventListener('DOMContentLoaded', async () => {
     return items;
   }
 
-  const items = await renderSummary();
-  const wishlists = await getStorageData(StorageKeys.TRACKED_WISHLISTS, StorageArea.LOCAL) || [];
-  const trackedWishlistIds = wishlists
-    .map((w) => (typeof w === 'string' ? w : w.id))
-    .filter(Boolean);
+  try {
+    const items = await renderSummary();
+    const wishlists = await getStorageData(StorageKeys.TRACKED_WISHLISTS, StorageArea.LOCAL) || [];
+    const trackedWishlistIds = (Array.isArray(wishlists) ? wishlists : [])
+      .filter((w) => typeof w === 'string' || (w && typeof w === 'object'))
+      .map((w) => (typeof w === 'string' ? w : w.id))
+      .filter(Boolean);
 
-  // Decide what (if anything) to offer for the current tab. Never offer to
-  // track a non-Amazon page, an already-tracked product, or a tracked list.
-  chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-    const url = tabs[0]?.url || '';
-    if (!parseCanonicalAmazonUrl(url)) {
-      return; // Not an Amazon page: offer nothing.
-    }
-
-    const asin = getAmazonAsin(url);
-    if (asin) {
-      if (items.some((item) => item.id === asin)) {
-        showTabStatus('✓ Already tracking this product', true);
-      } else {
-        addBtn.hidden = false;
-        tabAction.hidden = false;
+    // Decide what (if anything) to offer for the current tab. Never offer to
+    // track a non-Amazon page, an already-tracked product, or a tracked list.
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      const url = tabs[0]?.url || '';
+      if (!parseCanonicalAmazonUrl(url)) {
+        return; // Not an Amazon page: offer nothing.
       }
-      return;
-    }
 
-    const wishlistId = getAmazonWishlistId(url);
-    if (wishlistId) {
-      if (trackedWishlistIds.includes(wishlistId)) {
-        showTabStatus('✓ This wishlist is already tracked', true);
-      } else {
-        importBtn.hidden = false;
-        tabAction.hidden = false;
-        importBtn.addEventListener('click', () => {
-          // The dashboard auto-starts the import when given ?import=<url>.
-          openDashboard(`?import=${encodeURIComponent(url)}`);
-          window.close();
-        });
+      const asin = getAmazonAsin(url);
+      if (asin) {
+        if (items.some((item) => item.id === asin)) {
+          showTabStatus('✓ Already tracking this product', true);
+        } else {
+          addBtn.hidden = false;
+          tabAction.hidden = false;
+        }
+        return;
       }
-      return;
-    }
 
-    showTabStatus('Open a product or wishlist page to track it', false);
-  });
+      const wishlistId = getAmazonWishlistId(url);
+      if (wishlistId) {
+        if (trackedWishlistIds.includes(wishlistId)) {
+          showTabStatus('✓ This wishlist is already tracked', true);
+        } else {
+          importBtn.hidden = false;
+          tabAction.hidden = false;
+          importBtn.addEventListener('click', () => {
+            // The dashboard auto-starts the import when given ?import=<url>.
+            openDashboard(`?import=${encodeURIComponent(url)}`);
+            window.close();
+          });
+        }
+        return;
+      }
+
+      showTabStatus('Open a product or wishlist page to track it', false);
+    });
+  } catch (error) {
+    console.error('Popup failed to load tracked items:', error);
+    showStatus('Couldn’t load your tracked items. Open the dashboard to review them.', 'error');
+  }
 
   addBtn.addEventListener('click', () => {
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {

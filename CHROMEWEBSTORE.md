@@ -82,7 +82,6 @@ English
 | `alarms` | permissions | Required to schedule background checks for price updates and restocks without keeping the extension active in memory. |
 | `notifications` | permissions | Required to alert the user immediately when a tracked item drops in price or comes back in stock. |
 | `offscreen` | permissions | Required to accurately parse Amazon's product and wishlist HTML in the background using DOM APIs not available in service workers. |
-| `tabs` | permissions | Required to determine if the user is currently viewing an Amazon wishlist to offer contextual import features. |
 | `https://*.amazon.com/*` (and supported EU HTTPS regions) | host_permissions | Required to fetch real-time price and stock data directly from Amazon domains on the user's behalf. |
 
 

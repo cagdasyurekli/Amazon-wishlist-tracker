@@ -78,6 +78,7 @@ This document defines the expected behavior of all features in the Amazon Wishli
 - **Purpose:** Fast interactions and status checks.
 - **Features:** 
   - Shows context-aware tracking buttons (e.g., "Track This Product" if on an untracked Amazon page).
+  - Reads price history only when an item lacks a stored tracking-start price. Malformed stored records (non-object tracked items or wishlist entries) are ignored; if the popup still cannot load, it shows an error banner and keeps the dashboard buttons usable.
   - Displays 3 compact highlights, prioritizing meaningful price drops and then recently updated products.
   - Shows current price and a green drop/red rise badge when the change from the durable tracking-start price is at least 0.5%. The baseline is captured before retention or low/high compaction can remove the original history sample and is preserved by backup v2.
   - Labels that comparison as “since tracking started” and exposes the start date when it is available. Legacy data without a recoverable start baseline is labeled as the earliest retained sample instead.
