@@ -4,6 +4,20 @@ All notable changes to this project are documented here. Versions follow semanti
 
 ## [Unreleased]
 
+## [1.4.8] - 2026-09-29
+
+### Fixed
+
+- Popup no longer renders blank when stored tracked items or tracked wishlists contain malformed (non-object) records; such tracked-item entries are ignored on read, and any other load failure shows an error banner with the dashboard still reachable. The dashboard's current-tab check also tolerates malformed tracked wishlist entries.
+
+### Changed
+
+- Popup no longer loads the full price history on open unless an item lacks a stored tracking-start price.
+
+### Security
+
+- Removed the unused `tabs` permission; Amazon tab URLs remain available through the existing Amazon host permissions, and non-Amazon tab URLs/titles are no longer readable.
+
 ## [1.4.7] - 2026-09-25
 
 ### Changed

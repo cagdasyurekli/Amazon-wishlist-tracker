@@ -340,8 +340,7 @@ Manifest permissions are used as follows:
 - **alarms**: schedule background checks.
 - **notifications**: show price, discount, restock, and migration-review alerts.
 - **offscreen**: parse Amazon HTML with DOM APIs unavailable to the service worker.
-- **tabs**: identify relevant open Amazon tabs and open extension/product pages.
-- **Amazon host permissions**: read supported product and wishlist pages.
+- **Amazon host permissions**: read supported product and wishlist pages, and let the extension see the URL of open Amazon tabs. No broader `tabs` permission is requested.
 
 The extension does not need or request your Amazon password. Do not add credentials to
 a bug report, exported example, or AI prompt.

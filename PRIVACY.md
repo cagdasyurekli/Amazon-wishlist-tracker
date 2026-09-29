@@ -42,8 +42,7 @@ The selected history-retention setting removes expired price-history points duri
 - `alarms`: schedule adaptive product checks, priority checks, and resumable wishlist sync.
 - `notifications`: show local price and availability alerts.
 - `offscreen`: parse Amazon HTML with DOM APIs unavailable to an MV3 service worker.
-- `tabs`: identify supported open Amazon product/wishlist tabs and communicate with their content scripts.
-- Amazon host permissions: read supported pages and fetch current product/wishlist information directly from Amazon.
+- Amazon host permissions: read supported pages, fetch current product/wishlist information directly from Amazon, and identify open Amazon tabs (their URLs) so the popup and dashboard can offer tracking and communicate with content scripts. The extension does not request the `tabs` permission and cannot read the URL or title of non-Amazon tabs.
 
 ## Changes
 

@@ -202,7 +202,7 @@ Verified: all six tab contexts in the harness, add-flow state transition, 22/22 
 
 ## 3. Security & Privacy
 
-- 🟢 **Manifest permissions are appropriately minimal** (`storage`, `alarms`, `notifications`, `offscreen` + Amazon host permissions). No `tabs`, `<all_urls>`, `scripting`, or `webRequest`. Keep it this way — do not add `tabs` just to read a URL; host permissions already expose the URL for Amazon tabs.
+- 🟢 **Manifest permissions are appropriately minimal** (`storage`, `unlimitedStorage`, `alarms`, `notifications`, `offscreen` + Amazon host permissions). No `tabs` (a stray `tabs` entry was removed from the manifest; it is not needed), `<all_urls>`, `scripting`, or `webRequest`. Keep it this way — do not add `tabs` just to read a URL; host permissions already expose the URL for Amazon tabs.
 
 - 🟢 **No XSS sink found in the chart/UI path (GOOD — keep it that way).** The popup renders titles/prices with `.textContent` and draws history into a `<canvas>` (currently via the local `renderSparkline`); there is no `innerHTML`/`insertAdjacentHTML` with scraped data. **Rule for future chart-injection-into-Amazon-pages work:** scraped strings (title, seller, price) are *untrusted*. Inject only via `textContent`/DOM APIs or a sanitizer — never string-concatenate them into `innerHTML`. The current content script only injects a static button, which is fine.
 

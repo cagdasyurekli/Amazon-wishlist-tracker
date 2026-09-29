@@ -336,7 +336,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     const openWishlistTabs = tabs.filter(tab => {
       return Boolean(parseCanonicalAmazonWishlistUrl(tab?.url || ''));
     });
-    const trackedWishlistIds = trackedWishlists.map(w => typeof w === 'string' ? w : w.id).filter(Boolean);
+    const trackedWishlistIds = (Array.isArray(trackedWishlists) ? trackedWishlists : [])
+      .map(w => typeof w === 'string' ? w : w?.id)
+      .filter(Boolean);
     const trackedOpenWishlist = openWishlistTabs.find(tab => trackedWishlistIds.includes(getWishlistId(tab.url)));
     const wishlistUrl = isActiveAmazonWishlist
       ? activeTab.url
