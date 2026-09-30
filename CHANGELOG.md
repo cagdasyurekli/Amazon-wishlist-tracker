@@ -4,8 +4,19 @@ All notable changes to this project are documented here. Versions follow semanti
 
 ## [Unreleased]
 
+## [1.4.9] - 2026-10-01
+
 ### Fixed
+
 - Toolbar badge could count more items than the popup and dashboard: it measured discounts against Amazon's strike-through list price and applied the default discount where the others did not. Badge, discount notifications, popup, and dashboard now share one alert rule that measures from the price when tracking started and excludes purchased items.
+
+### Changed
+
+- Discount notifications now use the same measure, so an inflated strike-through list price no longer triggers a "Discount reached" alert.
+
+### Security
+
+- Updated development-only dependency overrides (`undici` 7.29.1, `brace-expansion` 1.1.21 / 2.1.7 / 5.0.12) for new high-severity advisories. No runtime extension code is affected.
 
 ## [1.4.8] - 2026-09-29
 
