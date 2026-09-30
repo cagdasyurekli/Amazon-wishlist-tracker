@@ -65,6 +65,7 @@ This document defines the expected behavior of all features in the Amazon Wishli
 
 ### 2.5 Extension Icon Badge
 - **Behavior:** A red numerical badge on the extension icon displays the total number of tracked items that currently meet their discount or target price conditions.
+- **Alert condition:** One shared rule (`src/utils/alerts.mjs`) drives the badge, discount notifications, the popup target-reached link, and the dashboard **Target reached** filter, so their counts agree. Purchased items never count. A target price is met at or below it. A discount is measured from the price when tracking started (wishlist when-added price, else tracking-start price, else original price), never from Amazon's strike-through list price; the item's own threshold wins over the global default.
 - **Architecture:** Driven by a `chrome.storage.onChanged` listener. Instantly updates when settings change, items are deleted, or prices update.
 
 ### 2.6 Legacy Target Review

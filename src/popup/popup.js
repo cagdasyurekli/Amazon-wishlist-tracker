@@ -6,6 +6,7 @@ import {
   parseCanonicalAmazonUrl
 } from '../utils/amazon.js';
 import { getTrackingBaseline, getTrackingChange } from '../utils/history.mjs';
+import { meetsAlertCondition } from '../utils/alerts.mjs';
 
 // The popup is a quick-glance surface: current-tab action + a few recent
 // items. The full list lives in the dashboard — rendering hundreds of cards
@@ -80,20 +81,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     recentList.textContent = '';
     recentSection.hidden = items.length === 0;
-    const targetReachedCount = items.filter((item) => {
-      const baseline = Number.isFinite(item.wishlistPriceWhenAdded)
-        ? item.wishlistPriceWhenAdded
-        : Number.isFinite(item.originalPrice)
-          ? item.originalPrice
-          : null;
-      const targetPriceReached = Number.isFinite(item.targetPrice) && Number.isFinite(item.currentPrice) && item.currentPrice <= item.targetPrice;
-      let discount = Number.isFinite(baseline) && baseline > 0 && Number.isFinite(item.currentPrice)
-        ? ((baseline - item.currentPrice) / baseline) * 100
-        : 0;
-      if (discount <= 0 && item.wishlistPriceDropPercent > 0) discount = item.wishlistPriceDropPercent;
-      const discountReached = Number.isFinite(item.targetDiscountPercentage) && discount >= item.targetDiscountPercentage;
-      return targetPriceReached || discountReached;
-    }).length;
+    const settings = await getStorageData(StorageKeys.SETTINGS, StorageArea.SYNC) || {};
+    const targetReachedCount = items.filter(item => meetsAlertCondition(item, settings.defaultDiscount)).length;
     targetReachedBtn.hidden = targetReachedCount === 0;
     targetReachedBtn.textContent = `View ${targetReachedCount} Target-Reached Item${targetReachedCount === 1 ? '' : 's'}`;
     if (items.length === 0) {

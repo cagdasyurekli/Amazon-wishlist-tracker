@@ -8,6 +8,7 @@ import {
   OPTIONS_SETTINGS_FIELDS,
   validateSettingsPatch
 } from '../utils/settings.js';
+import { effectiveTargetDiscount, meetsAlertCondition, trackingDiscountPercent } from '../utils/alerts.mjs';
 import './legacy_target_notice.js';
 import './wishlist_partial_policy.js';
 
@@ -1579,14 +1580,9 @@ export function processScrapeResult(item, result, historyObj, timestamp = Date.n
   }
 
   // 2. Discount Percentage Alert
-  const targetDiscount = item.targetDiscountPercentage || settings.defaultDiscount;
+  const targetDiscount = effectiveTargetDiscount(item, settings.defaultDiscount);
   if (targetDiscount) {
-    let currentDiscount = 0;
-    if (item.originalPrice && item.originalPrice > currentPrice) {
-      currentDiscount = ((item.originalPrice - currentPrice) / item.originalPrice) * 100;
-    } else if (result.wishlistPriceDropPercent != null) {
-      currentDiscount = result.wishlistPriceDropPercent;
-    }
+    const currentDiscount = trackingDiscountPercent(item);
     
     if (currentDiscount >= targetDiscount && previousPrice != null && previousPrice > currentPrice) {
       alertTriggered = true;
@@ -1668,36 +1664,8 @@ export async function updateBadgeCount() {
     const items = await getTrackedItems() || [];
     const settings = await getStorageData(StorageKeys.SETTINGS, StorageArea.SYNC) || {};
     
-    let discountedCount = 0;
-    
-    for (const item of items) {
-      if (!item.currentPrice || item.isPurchased) continue;
-      
-      let isDiscounted = false;
-      
-      const targetDiscount = item.targetDiscountPercentage || settings.defaultDiscount;
-      if (targetDiscount) {
-        if (item.originalPrice && item.originalPrice > item.currentPrice) {
-          const discount = ((item.originalPrice - item.currentPrice) / item.originalPrice) * 100;
-          if (discount >= targetDiscount) {
-            isDiscounted = true;
-          }
-        }
-        if (!isDiscounted && item.wishlistPriceDropPercent != null && item.wishlistPriceDropPercent >= targetDiscount) {
-          isDiscounted = true;
-        }
-      }
-      
-      const targetPrice = item.targetPrice;
-      if (!isDiscounted && targetPrice && item.currentPrice <= targetPrice) {
-        isDiscounted = true;
-      }
-      
-      if (isDiscounted) {
-        discountedCount++;
-      }
-    }
-    
+    const discountedCount = items.filter(item => meetsAlertCondition(item, settings.defaultDiscount)).length;
+
     const text = discountedCount > 0 ? discountedCount.toString() : '';
     await chrome.action.setBadgeText({ text });
     await chrome.action.setBadgeBackgroundColor({ color: '#ff0000' });

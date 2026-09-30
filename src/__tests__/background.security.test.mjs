@@ -7,6 +7,7 @@ const backgroundSource = await readFile(new URL('../background/background.js', i
 const legacyNoticeSource = await readFile(new URL('../background/legacy_target_notice.js', import.meta.url), 'utf8');
 const partialPolicySource = await readFile(new URL('../background/wishlist_partial_policy.js', import.meta.url), 'utf8');
 const settingsSource = await readFile(new URL('../utils/settings.js', import.meta.url), 'utf8');
+const alertsSource = await readFile(new URL('../utils/alerts.mjs', import.meta.url), 'utf8');
 
 async function loadBackground(initialItems = [], options = {}) {
   let trackedItems = initialItems.map((item) => ({ ...item }));
@@ -232,6 +233,7 @@ async function loadBackground(initialItems = [], options = {}) {
   const legacyNoticeModule = new vm.SourceTextModule(legacyNoticeSource, { context });
   const partialPolicyModule = new vm.SourceTextModule(partialPolicySource, { context });
   const settingsModule = new vm.SourceTextModule(settingsSource, { context });
+  const alertsModule = new vm.SourceTextModule(alertsSource, { context });
   const backupModule = new vm.SyntheticModule(
     ['validateBackupPayload'],
     function initialize() {
@@ -250,6 +252,7 @@ async function loadBackground(initialItems = [], options = {}) {
     if (specifier === '../utils/amazon.js') return amazonModule;
     if (specifier === '../utils/backup.js') return backupModule;
     if (specifier === '../utils/settings.js') return settingsModule;
+    if (specifier === '../utils/alerts.mjs') return alertsModule;
     if (specifier === './legacy_target_notice.js') return legacyNoticeModule;
     if (specifier === './wishlist_partial_policy.js') return partialPolicyModule;
     throw new Error(`Unexpected import: ${specifier}`);

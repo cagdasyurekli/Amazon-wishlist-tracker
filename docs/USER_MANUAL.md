@@ -256,6 +256,10 @@ Settings** instead.
 The red toolbar badge is the number of tracked products that currently meet either a
 target-price or discount condition. It is not the total tracked-product count and does
 not mean every product was checked recently.
+Discounts count from the price when you started tracking, not from Amazon's
+strike-through list price, and purchased products are excluded. The popup's
+target-reached link and the dashboard **Target reached** filter use the same rule, so
+they show the same number as the badge.
 
 Notifications also depend on Chrome and operating-system notification permissions.
 
