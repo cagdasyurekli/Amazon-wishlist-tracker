@@ -20,6 +20,7 @@ import {
   validHistory
 } from '../utils/price_chart.mjs';
 import { getTrackingChange } from '../utils/history.mjs';
+import { meetsAlertCondition } from '../utils/alerts.mjs';
 
 document.addEventListener('DOMContentLoaded', async () => {
   const itemList = document.getElementById('item-list');
@@ -161,12 +162,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (filter === 'priority') return Boolean(item.isPriority);
     if (filter === 'outOfStock') return item.inStock === false;
     if (filter === 'unchecked') return !item.lastChecked;
-    if (filter === 'targetReached') {
-      const priceReached = Number.isFinite(item.targetPrice) && Number.isFinite(item.currentPrice) && item.currentPrice <= item.targetPrice;
-      const discount = getPriceDropDetails(item)?.percent || 0;
-      const discountReached = Number.isFinite(item.targetDiscountPercentage) && discount >= item.targetDiscountPercentage;
-      return priceReached || discountReached;
-    }
+    if (filter === 'targetReached') return meetsAlertCondition(item, settings.defaultDiscount);
     return true;
   }
 

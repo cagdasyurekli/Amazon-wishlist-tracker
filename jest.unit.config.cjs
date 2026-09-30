@@ -9,6 +9,7 @@ module.exports = {
     'storage.security.test.mjs',
     'wishlist.security.test.mjs',
     'content.security.e2e.mjs',
-    'price_chart.test.mjs'
+    'price_chart.test.mjs',
+    'alerts.test.mjs'
   ]
 };

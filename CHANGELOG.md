@@ -4,6 +4,9 @@ All notable changes to this project are documented here. Versions follow semanti
 
 ## [Unreleased]
 
+### Fixed
+- Toolbar badge could count more items than the popup and dashboard: it measured discounts against Amazon's strike-through list price and applied the default discount where the others did not. Badge, discount notifications, popup, and dashboard now share one alert rule that measures from the price when tracking started and excludes purchased items.
+
 ## [1.4.8] - 2026-09-29
 
 ### Fixed
