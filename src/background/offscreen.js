@@ -116,10 +116,12 @@ function sanitizeAmazonImageUrl(value, baseUrl) {
 }
 
 function extractAuthorNames(root, selector) {
-  return [...new Set(Array.from(root.querySelectorAll(selector))
-    .map((node) => (node.textContent || '').replace(/\s+/g, ' ').trim())
-    .filter((name) => name && name.length <= MAX_AUTHOR_LENGTH))]
-    .slice(0, MAX_PRODUCT_AUTHORS);
+  return globalThis.AmazonAvailability.extractAuthorNames(
+    root,
+    selector,
+    MAX_PRODUCT_AUTHORS,
+    MAX_AUTHOR_LENGTH
+  );
 }
 
 function parseInertHtml(htmlString, baseUrl) {
@@ -222,39 +224,8 @@ function handleMessages(message, sender, sendResponse) {
   }
 }
 
-/**
- * Parses a raw Amazon price string into a float, correctly handling both
- * US ("$1,299.99") and EU ("1.299,95 €") grouping/decimal conventions.
- *
- * The decimal separator is whichever of '.' or ',' appears last AND is
- * followed by 1-2 digits at the end of the string. Everything else of that
- * kind is treated as a thousands separator and stripped. If no separator is
- * followed by 1-2 trailing digits, the value is treated as an integer and all
- * separators are stripped (e.g. "1,234,567" -> 1234567).
- *
- * Returns null when no numeric value can be extracted.
- * @param {string} rawText
- * @returns {number|null}
- */
 function parsePrice(rawText) {
-  if (!rawText) return null;
-  const cleaned = rawText.replace(/[^\d.,]/g, '');
-  if (!cleaned) return null;
-
-  // A trailing ".dd" or ",d" (1-2 digits) marks the decimal portion.
-  const decimalMatch = cleaned.match(/([.,])(\d{1,2})$/);
-  let normalized;
-  if (decimalMatch) {
-    const decimalSep = decimalMatch[1];
-    const thousandsSep = decimalSep === '.' ? ',' : '.';
-    normalized = cleaned.split(thousandsSep).join('').replace(decimalSep, '.');
-  } else {
-    // No decimal part: every separator is a thousands grouping.
-    normalized = cleaned.replace(/[.,]/g, '');
-  }
-
-  const value = parseFloat(normalized);
-  return isNaN(value) ? null : value;
+  return globalThis.AmazonAvailability.parsePrice(rawText);
 }
 
 function parseSplitPrice(container) {
@@ -267,31 +238,11 @@ function parseSplitPrice(container) {
 }
 
 function extractCurrency(rawText) {
-  if (!rawText) return null;
-  const symbol = rawText.match(/[$€£¥₺]/)?.[0];
-  if (symbol) return symbol;
-  return /(?:^|[\d.,\s])TL(?:[\d.,\s]|$)/i.test(rawText) ? '₺' : null;
+  return globalThis.AmazonAvailability.extractCurrency(rawText);
 }
 
 function parseWishlistPriceDrop(text, currentPrice) {
-  if (!text) return null;
-  const normalized = text.replace(/\s+/g, ' ').trim();
-  const dropMatch = normalized.match(/price\s+dropped\s+(\d{1,3})\s*%/i);
-  const wasMatch = normalized.match(/\(\s*was\s*([€$£¥]?\s*\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{2})?)\s*when\s+added\s+to\s+list\s*\)/i);
-  if (!dropMatch && !wasMatch) return null;
-
-  const wasPrice = wasMatch ? parsePrice(wasMatch[1]) : null;
-  const percent = dropMatch
-    ? parseInt(dropMatch[1], 10)
-    : (wasPrice && currentPrice ? Math.round(((wasPrice - currentPrice) / wasPrice) * 100) : null);
-
-  return {
-    percent: Number.isFinite(percent) ? percent : null,
-    wasPrice,
-    amount: wasPrice && currentPrice ? Math.max(0, Math.round((wasPrice - currentPrice) * 100) / 100) : null,
-    currency: extractCurrency(wasMatch ? wasMatch[1] : normalized),
-    text: normalized
-  };
+  return globalThis.AmazonAvailability.parseWishlistPriceDrop(text, currentPrice);
 }
 
 function parseAmazonHtml(htmlString, url) {
@@ -315,13 +266,7 @@ function parseAmazonHtml(htmlString, url) {
     isPurchased: false
   };
 
-  const purchasedTexts = [
-    'purchased on ',
-    'you own this item',
-    'gekocht op ',
-    'je hebt dit item gekocht'
-  ];
-  if (purchasedTexts.some(text => bodyText.includes(text))) {
+  if (globalThis.AmazonAvailability.classifyPurchasedText(bodyText)) {
     data.isPurchased = true;
   }
 
@@ -497,13 +442,9 @@ function parseAmazonWishlist(htmlString, url) {
       }
     }
     if (originalPrice === currentPrice) {
-      // Look for "was X" or "van X" (Dutch)
-      const wasMatch = el.textContent.match(/(?:was|van)\s*([€$£¥]?\s*\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{2})?)/i);
-      if (wasMatch) {
-        const parsedWas = parsePrice(wasMatch[1]);
-        if (parsedWas && parsedWas > currentPrice) {
-          originalPrice = parsedWas;
-        }
+      const parsedWas = globalThis.AmazonAvailability.extractWishlistWasPrice(el.textContent);
+      if (parsedWas && parsedWas > currentPrice) {
+        originalPrice = parsedWas;
       }
     }
 
@@ -519,9 +460,7 @@ function parseAmazonWishlist(htmlString, url) {
       'a[href*="/dp/"], [id^="item-byline"], [class*="item-byline"]'
     ).forEach((node) => node.remove());
     const purchaseStatusText = purchaseStatusRoot.textContent.toLowerCase();
-    const isPurchased = purchaseStatusText.includes('purchased') ||
-      purchaseStatusText.includes('gekocht') ||
-      purchaseStatusText.includes('you own this item');
+    const isPurchased = globalThis.AmazonAvailability.classifyPurchasedText(purchaseStatusText);
 
     // Only add if not already in our extracted list (duplicates sometimes exist)
     if (!items.find(i => i.id === asin)) {

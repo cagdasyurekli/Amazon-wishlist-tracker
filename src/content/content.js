@@ -58,10 +58,12 @@ function extractAsinFromUrl(rawUrl) {
 }
 
 function extractAuthorNames(root, selector) {
-  return [...new Set(Array.from(root.querySelectorAll(selector))
-    .map((node) => (node.textContent || '').replace(/\s+/g, ' ').trim())
-    .filter((name) => name && name.length <= MAX_AUTHOR_LENGTH))]
-    .slice(0, MAX_PRODUCT_AUTHORS);
+  return globalThis.AmazonAvailability.extractAuthorNames(
+    root,
+    selector,
+    MAX_PRODUCT_AUTHORS,
+    MAX_AUTHOR_LENGTH
+  );
 }
 
 // Inject a "Track Price" button near the Amazon Buy Box. The closed shadow
@@ -187,48 +189,15 @@ function extractAndTrackProduct() {
 }
 
 function parsePrice(rawText) {
-  if (!rawText) return null;
-  const cleaned = rawText.replace(/[^\d.,]/g, '');
-  if (!cleaned) return null;
-
-  const decimalMatch = cleaned.match(/([.,])(\d{1,2})$/);
-  const normalized = decimalMatch
-    ? cleaned
-        .split(decimalMatch[1] === '.' ? ',' : '.')
-        .join('')
-        .replace(decimalMatch[1], '.')
-    : cleaned.replace(/[.,]/g, '');
-
-  const value = parseFloat(normalized);
-  return Number.isNaN(value) ? null : value;
+  return globalThis.AmazonAvailability.parsePrice(rawText);
 }
 
 function extractCurrency(rawText) {
-  if (!rawText) return null;
-  const symbol = rawText.match(/[$€£¥₺]/)?.[0];
-  if (symbol) return symbol;
-  return /(?:^|[\d.,\s])TL(?:[\d.,\s]|$)/i.test(rawText) ? '₺' : null;
+  return globalThis.AmazonAvailability.extractCurrency(rawText);
 }
 
 function parseWishlistPriceDrop(text, currentPrice) {
-  if (!text) return null;
-  const normalized = text.replace(/\s+/g, ' ').trim();
-  const dropMatch = normalized.match(/price\s+dropped\s+(\d{1,3})\s*%/i);
-  const wasMatch = normalized.match(/\(\s*was\s*([€$£¥]?\s*\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{2})?)\s*when\s+added\s+to\s+list\s*\)/i);
-  if (!dropMatch && !wasMatch) return null;
-
-  const wasPrice = wasMatch ? parsePrice(wasMatch[1]) : null;
-  const percent = dropMatch
-    ? parseInt(dropMatch[1], 10)
-    : (wasPrice && currentPrice ? Math.round(((wasPrice - currentPrice) / wasPrice) * 100) : null);
-
-  return {
-    percent: Number.isFinite(percent) ? percent : null,
-    wasPrice,
-    amount: wasPrice && currentPrice ? Math.max(0, Math.round((wasPrice - currentPrice) * 100) / 100) : null,
-    currency: extractCurrency(wasMatch ? wasMatch[1] : normalized),
-    text: normalized
-  };
+  return globalThis.AmazonAvailability.parseWishlistPriceDrop(text, currentPrice);
 }
 
 function extractWishlistItemsFromPage() {
@@ -304,8 +273,19 @@ function extractWishlistItemsFromPage() {
     if (strikePrice && currentPrice && strikePrice > currentPrice) {
       originalPrice = strikePrice;
     }
+    if (originalPrice === currentPrice) {
+      const parsedWas = globalThis.AmazonAvailability.extractWishlistWasPrice(text);
+      if (parsedWas && currentPrice && parsedWas > currentPrice) {
+        originalPrice = parsedWas;
+      }
+    }
 
     const unavailable = globalThis.AmazonAvailability.classifyAvailabilityText(text) === false;
+    const purchaseStatusRoot = row.cloneNode(true);
+    purchaseStatusRoot.querySelectorAll(
+      'a[href*="/dp/"], a[href*="/gp/product/"], [id^="item-byline"], [class*="item-byline"]'
+    ).forEach((node) => node.remove());
+    const isPurchased = globalThis.AmazonAvailability.classifyPurchasedText(purchaseStatusRoot.textContent || '');
 
     items.push({
       id: asin,
@@ -322,6 +302,7 @@ function extractWishlistItemsFromPage() {
       wishlistPriceDropText: wishlistPriceDropText?.slice(0, 500) || null,
       currency: currency?.slice(0, 8) || null,
       inStock: !unavailable,
+      isPurchased,
       addedAt: Date.now()
     });
   });

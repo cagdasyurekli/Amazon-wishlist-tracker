@@ -4,6 +4,18 @@ All notable changes to this project are documented here. Versions follow semanti
 
 ## [Unreleased]
 
+## [1.4.10] - 2026-10-13
+
+### Fixed
+
+- Wishlist price-drop parsing now recognizes Turkish Lira (`₺` and trailing `TL`) and localized "when added to list" / "price dropped" wording across all eight supported Amazon marketplaces (EN, NL, DE, FR, ES, IT, TR).
+- Purchased-item detection now recognizes localized purchase phrasing across all supported marketplaces (`purchased`, `gekocht`, `gekauft`, `acheté`, `comprado`, `acquistato`, `satın alındı`) in both background and visible-tab extraction while continuing to ignore product titles and author bylines.
+
+### Changed
+
+- Consolidated price, currency, author, wishlist price-drop, and purchase-status parsing into the shared `src/utils/availability.js` utility used by both the offscreen parser and the content script.
+- Background product and wishlist requests now send a marketplace-matched `Accept-Language` header derived from the validated Amazon hostname.
+
 ## [1.4.9] - 2026-10-01
 
 ### Fixed
