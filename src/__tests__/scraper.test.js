@@ -88,6 +88,30 @@ describe('Amazon HTML Parser (Offscreen Worker)', () => {
 
     expect(result.items[0].isPurchased).toBe(true);
     expect(result.items[1].isPurchased).toBe(false);
+
+    const trResult = parseAmazonWishlist(`
+      <html><body>
+        <input name="listId" value="LIST1">
+        <div id="g-items">
+          <li data-itemid="ITEM1">
+            <a id="itemName_B000000003" href="/dp/B000000003">Satın alındı Başlıklı Kitap</a>
+            <span class="a-price"><span class="a-offscreen">850,00 TL</span></span>
+            <div>Fiyatı %15 düştü (listeye eklendiğinde 1.000,00 TL idi)</div>
+          </li>
+          <li data-itemid="ITEM2">
+            <a id="itemName_B000000004" href="/dp/B000000004">Normal Ürün</a>
+            <span>Satın alındı: 12 Ekim 2026</span>
+          </li>
+        </div>
+      </body></html>
+    `, 'https://www.amazon.com.tr/hz/wishlist/ls/LIST1');
+
+    expect(trResult.items[0].isPurchased).toBe(false);
+    expect(trResult.items[0].wishlistPriceDropPercent).toBe(15);
+    expect(trResult.items[0].wishlistPriceWhenAdded).toBe(1000);
+    expect(trResult.items[0].wishlistPriceDropAmount).toBe(150);
+    expect(trResult.items[0].originalPrice).toBe(1000);
+    expect(trResult.items[1].isPurchased).toBe(true);
   });
 
   it('should throw an error if a CAPTCHA is detected via the title', () => {

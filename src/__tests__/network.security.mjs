@@ -116,6 +116,10 @@ describe('canonical Amazon URL and image policy', () => {
     ]) {
       assert.equal(amazon.parseCanonicalAmazonUrl(value), null, value);
     }
+    assert.equal(amazon.getAmazonAcceptLanguage('https://www.amazon.com.tr/dp/B000000001'), 'tr-TR,tr;q=0.9,en-US;q=0.7,en;q=0.5');
+    assert.equal(amazon.getAmazonAcceptLanguage('https://www.amazon.de/dp/B000000001'), 'de-DE,de;q=0.9,en-US;q=0.7,en;q=0.5');
+    assert.equal(amazon.getAmazonAcceptLanguage('https://www.amazon.co.uk/dp/B000000001'), 'en-GB,en;q=0.9,en-US;q=0.7');
+    assert.equal(amazon.getAmazonAcceptLanguage('https://www.amazon.com/dp/B000000001'), 'en-US,en;q=0.5');
   });
 
   it('accepts only identity-bound same-origin Amazon wishlist continuation URLs', () => {

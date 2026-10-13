@@ -5,6 +5,7 @@
  */
 
 import {
+  getAmazonAcceptLanguage,
   getAmazonAsin,
   getAmazonWishlistId,
   parseCanonicalAmazonProductUrl,
@@ -118,7 +119,7 @@ async function fetchAndParse(url, messageType, { deadlineAt, maxBytes, validateU
           signal: controller.signal,
           headers: {
             'Accept': 'text/html,application/xhtml+xml;q=0.9',
-            'Accept-Language': 'en-US,en;q=0.5'
+            'Accept-Language': getAmazonAcceptLanguage(requestedUrl.href)
           }
         });
 
