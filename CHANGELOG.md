@@ -16,6 +16,10 @@ All notable changes to this project are documented here. Versions follow semanti
 - Consolidated price, currency, author, wishlist price-drop, and purchase-status parsing into the shared `src/utils/availability.js` utility used by both the offscreen parser and the content script.
 - Background product and wishlist requests now send a marketplace-matched `Accept-Language` header derived from the validated Amazon hostname.
 
+### Security
+
+- Added a development-only dependency override (`source-map-js` 1.2.2) to resolve GHSA-68fv-2mgg-jv7q. No runtime extension code is affected.
+
 ## [1.4.9] - 2026-10-01
 
 ### Fixed
