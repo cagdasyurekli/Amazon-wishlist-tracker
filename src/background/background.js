@@ -397,17 +397,20 @@ chrome.runtime.onInstalled.addListener(() => {
   console.log('Amazon Wishlist Tracker installed.');
   ensureAlarms();
   updateBadgeCount();
+  clearStaleNotifications();
   queueLegacyTargetUpgradeNotice();
   migrateLegacyWishlistRegions().catch(() => {});
 });
 chrome.runtime.onStartup.addListener(() => {
   ensureAlarms();
   updateBadgeCount();
+  clearStaleNotifications();
   queueLegacyTargetUpgradeNotice();
   migrateLegacyWishlistRegions().catch(() => {});
 });
 ensureAlarms();
 updateBadgeCount();
+clearStaleNotifications();
 queueLegacyTargetUpgradeNotice();
 migrateLegacyWishlistRegions().catch(() => {});
 
@@ -417,6 +420,9 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
     (areaName === StorageArea.SYNC && changes[StorageKeys.SETTINGS])
   ) {
     updateBadgeCount();
+  }
+  if (areaName === StorageArea.LOCAL && changes[StorageKeys.TRACKED_ITEMS]) {
+    clearStaleNotifications();
   }
   if (areaName === StorageArea.SYNC && changes[StorageKeys.SETTINGS]) {
     queueLegacyTargetUpgradeNotice();
@@ -1648,6 +1654,7 @@ chrome.notifications.onButtonClicked.addListener(async (notificationId, buttonIn
   }
   if (buttonIndex === 0) {
     await openTrackedItem(notificationId);
+    await chrome.notifications.clear(notificationId);
   }
 });
 
@@ -1657,7 +1664,23 @@ chrome.notifications.onClicked.addListener(async (notificationId) => {
     return;
   }
   await openTrackedItem(notificationId);
+  await chrome.notifications.clear(notificationId);
 });
+
+// Alerts are keyed by ASIN. Once an item is removed (wishlist sync, purchase,
+// manual delete, restore) its alert is stale and its click target is gone, so
+// sweep every active notification against the current collection.
+async function clearStaleNotifications() {
+  try {
+    const [active, items] = await Promise.all([chrome.notifications.getAll(), getTrackedItems()]);
+    const liveIds = new Set((items || []).filter((item) => item && !item.isPurchased).map((item) => item.id));
+    await Promise.all(Object.keys(active || {})
+      .filter((id) => !isLegacyTargetNoticeNotification(id) && !liveIds.has(id))
+      .map((id) => chrome.notifications.clear(id)));
+  } catch (err) {
+    console.error('Failed to clear stale notifications:', err);
+  }
+}
 
 export async function updateBadgeCount() {
   try {

@@ -251,7 +251,9 @@ a later downward move; restock alerts require a later out-of-stock to in-stock
 transition.
 Selecting a price, discount, or restock notification opens the tracked Amazon
 product. Selecting the previous-target upgrade notice opens **Extension
-Settings** instead.
+Settings** instead. Opening a notification dismisses it, and the extension clears
+alerts for products you stop tracking, including purchased products removed by
+wishlist sync.
 
 The red toolbar badge is the number of tracked products that currently meet either a
 target-price or discount condition. It is not the total tracked-product count and does
