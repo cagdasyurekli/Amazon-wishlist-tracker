@@ -4,6 +4,16 @@ All notable changes to this project are documented here. Versions follow semanti
 
 ## [Unreleased]
 
+## [1.4.11] - 2026-10-25
+
+### Fixed
+
+- Price, discount, and restock notifications stayed in the notification center after their product left tracking (purchased, dropped from a synced wishlist, or deleted), and clicking them did nothing. Alerts for untracked or purchased products are now cleared whenever the tracked list changes and at startup, and a notification is dismissed once it is opened. The previous-target review notice is unaffected.
+
+### Security
+
+- Updated development-only dependencies (`puppeteer` 25.16.0, which moves `chromium-bidi` to a patched `zod`, and the `undici` override to 7.30.1) for GHSA-mrhx-c7xc-m3w5, GHSA-4qv8-2p9j-2685, and GHSA-f72v-6w45-q472. No runtime extension code is affected.
+
 ## [1.4.10] - 2026-10-13
 
 ### Fixed
