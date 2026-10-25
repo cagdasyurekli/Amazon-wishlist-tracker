@@ -16,6 +16,10 @@ async function loadBackground(initialItems = [], options = {}) {
   let settingsWriteCount = 0;
   let messageListener;
   let alarmListener;
+  let storageChangeListener;
+  let notificationClickListener;
+  const activeNotifications = new Set(options.activeNotifications || []);
+  const clearedNotifications = [];
   const savedItems = [];
   const notifications = [];
   const badgeTexts = [];
@@ -53,11 +57,19 @@ async function loadBackground(initialItems = [], options = {}) {
         async clear() {},
         onAlarm: { addListener(listener) { alarmListener = listener; } }
       },
-      storage: { local: { async remove() {} }, onChanged: { addListener() {} } },
+      storage: { local: { async remove() {} }, onChanged: { addListener(listener) { storageChangeListener = listener; } } },
       notifications: {
-        create(id, options) { notifications.push({ id, options }); },
+        create(id, options) {
+          notifications.push({ id, options });
+          activeNotifications.add(id);
+        },
+        async getAll() { return Object.fromEntries([...activeNotifications].map((id) => [id, true])); },
+        async clear(id) {
+          clearedNotifications.push(id);
+          return activeNotifications.delete(id);
+        },
         onButtonClicked: { addListener() {} },
-        onClicked: { addListener() {} }
+        onClicked: { addListener(listener) { notificationClickListener = listener; } }
       },
       tabs: { async create() {} },
       action: {
@@ -268,6 +280,10 @@ async function loadBackground(initialItems = [], options = {}) {
     api: module.namespace,
     sendMessage,
     triggerAlarm: (name) => alarmListener({ name }),
+    triggerTrackedItemsChange: () => storageChangeListener({ trackedItems: {} }, 'local'),
+    clickNotification: (id) => notificationClickListener(id),
+    getActiveNotifications: () => [...activeNotifications].sort(),
+    clearedNotifications,
     savedItems,
     notifications,
     badgeTexts,
@@ -1039,6 +1055,39 @@ describe('discount, restock, and badge transitions', () => {
 
     await harness.api.updateBadgeCount();
     assert.equal(harness.badgeTexts.at(-1), '2');
+  });
+});
+
+describe('stale notification cleanup', () => {
+  const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+  it('clears alerts for untracked or purchased items at startup but keeps the legacy notice', async () => {
+    const harness = await loadBackground([
+      item('B000000001'),
+      item('B000000002', { isPurchased: true })
+    ], { activeNotifications: ['B000000001', 'B000000002', 'B000000003', 'legacy-target-upgrade-v1'] });
+    await flush();
+
+    assert.deepEqual(harness.getActiveNotifications(), ['B000000001', 'legacy-target-upgrade-v1']);
+  });
+
+  it('clears an alert once its item leaves the tracked collection', async () => {
+    const harness = await loadBackground([item('B000000001'), item('B000000002')], {
+      activeNotifications: ['B000000001', 'B000000002']
+    });
+    await flush();
+    await harness.sendMessage({ type: 'REMOVE_TRACKED_ITEM', id: 'B000000002' }, dashboardSender());
+    harness.triggerTrackedItemsChange();
+    await flush();
+
+    assert.deepEqual(harness.getActiveNotifications(), ['B000000001']);
+  });
+
+  it('clears an alert after the user clicks it', async () => {
+    const harness = await loadBackground([item('B000000001')], { activeNotifications: ['B000000001'] });
+    await harness.clickNotification('B000000001');
+
+    assert.deepEqual(harness.getActiveNotifications(), []);
   });
 });
 
